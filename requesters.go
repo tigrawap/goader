@@ -65,10 +65,10 @@ func (requester *httpRequester) request(channels *OPChannels, request *Request) 
 	if requester.data != nil {
 		req.SetBody(requester.data)
 	}
-	start := time.Now()
 	resp := fasthttp.AcquireResponse()
-	timeSpent := time.Since(start)
+	start := time.Now()
 	err := requester.client.Do(req, resp)
+	timeSpent := time.Since(start)
 	statusCode := resp.StatusCode()
 	fasthttp.ReleaseRequest(req)
 	fasthttp.ReleaseResponse(resp)
