@@ -1,16 +1,10 @@
 package main
 
 import (
-	randc "crypto/rand"
-	"errors"
 	"flag"
 	"fmt"
-	"math/rand"
-	"regexp"
 	"sort"
 	"time"
-
-	"github.com/valyala/fasthttp"
 )
 
 //Request struct
@@ -27,10 +21,11 @@ type Response struct {
 
 //Various constants to avoid typos
 const (
-	LowLatency    = "low-latency"
-	ConstantRatio = "constant"
-	Sleep         = "sleep"
-	Upload        = "upload"
+	LowLatency      = "low-latency"
+	ConstantRatio   = "constant"
+	ConstantThreads = "constant-threads"
+	Sleep           = "sleep"
+	Upload          = "upload"
 )
 
 var config struct {
@@ -58,73 +53,6 @@ func startWorker(channels *Channels, progress *Progress, operators *Operators) {
 		case request = <-channels.write.requests:
 			operators.writeRequster.request(&channels.write, request)
 		}
-	}
-}
-
-// Emitter of requests
-type Emitter interface {
-	emitRequests(channels *OPChannels, state *OPState)
-}
-
-type threadedEmitter struct{}
-
-func (emitter *threadedEmitter) emitRequests(channels *OPChannels, state *OPState) {
-	for state.speed > state.inFlight {
-		state.num++
-		channels.requests <- &Request{state.num}
-		state.inFlight++
-	}
-}
-
-func newRateEmitter(perSecond int, allowedNums *[]int64, useAllowed bool) *rateEmitter {
-	var emitEvery time.Duration
-	if perSecond != 0 {
-		emitEvery = time.Duration(time.Second) / time.Duration(perSecond)
-	} else {
-		emitEvery = 0
-	}
-	emitter := new(rateEmitter)
-	if allowedNums != nil {
-		emitter.allowedNums = allowedNums
-	}
-	emitter.startedAt = time.Now()
-	emitter.emitEvery = emitEvery
-	emitter.useAllowed = useAllowed
-	return emitter
-}
-
-type rateEmitter struct {
-	startedAt    time.Time
-	emitEvery    time.Duration
-	totalEmitted int64
-	allowedNums  *[]int64
-	useAllowed   bool
-}
-
-func (emitter *rateEmitter) emitRequests(channels *OPChannels, state *OPState) {
-	if emitter.emitEvery == 0 {
-		return
-	}
-
-	totalTimePassed := time.Since(emitter.startedAt)
-	shouldEmit := int64(totalTimePassed / emitter.emitEvery)
-	notEmitted := shouldEmit - emitter.totalEmitted
-	var i int64
-	for i = 0; i < notEmitted; i++ {
-		state.num++
-		var num int64
-		if emitter.useAllowed {
-			nums := *emitter.allowedNums
-			if len(nums) == 0 {
-				break
-			}
-			num = nums[rand.Intn(int(len(nums)))]
-		} else {
-			num = state.num
-		}
-		state.inFlight++
-		emitter.totalEmitted++
-		channels.requests <- &Request{num}
 	}
 }
 
@@ -156,44 +84,6 @@ type OPState struct {
 type Progress struct {
 	reads  OPState
 	writes OPState
-}
-
-//Adjuster should decide whether change throughput based on response
-type Adjuster interface {
-	adjust(response *Response, state *OPState)
-}
-
-type nullAdjuster struct {
-}
-
-func (adjuster *nullAdjuster) adjust(response *Response, state *OPState) {
-}
-
-type speedAdjuster struct {
-	movingCount int
-	avgTime     time.Duration
-	movingTime  time.Duration
-}
-
-func (adjuster *speedAdjuster) adjust(response *Response, state *OPState) {
-	adjuster.movingCount++
-	adjuster.avgTime += response.latency
-	if adjuster.movingCount == 5 {
-		adjuster.movingTime = adjuster.avgTime / 5
-		switch config.mode {
-		case LowLatency:
-			if response.err != nil || adjuster.movingTime >= badResponseTime*time.Millisecond {
-				if state.speed > 1 {
-					state.speed--
-				}
-			} else {
-				state.speed++
-			}
-			fmt.Printf("Channel size adjusted to %v %v\n", state.speed, adjuster.movingTime)
-			adjuster.movingCount = 0
-			adjuster.avgTime = 0
-		}
-	}
 }
 
 func processResponse(response *Response, state *OPState) {
@@ -242,85 +132,6 @@ func printResults(state *OPState) {
 	fmt.Println()
 }
 
-//Requester does actual requests to server/fs
-type Requester interface {
-	request(channels *OPChannels, request *Request)
-}
-
-type sleepRequster struct {
-	state *OPState
-}
-
-func (requester *sleepRequster) request(channels *OPChannels, request *Request) {
-	if rand.Intn(10000)-requester.state.inFlight < 0 {
-		fmt.Println("Error")
-		channels.responses <- &Response{request, 0, errors.New("Bad response")}
-		return
-	}
-	var timeToSleep = time.Duration(requester.state.inFlight*rand.Intn(10)) * time.Millisecond
-	time.Sleep(timeToSleep)
-	channels.responses <- &Response{request, timeToSleep, nil}
-}
-
-type httpRequester struct {
-	data             []byte
-	client           fasthttp.Client
-	method           string
-	pattern          *regexp.Regexp
-	patternFormatter string
-}
-
-func newHTTPRequester(mode string) *httpRequester {
-	if config.url == "" {
-		panic("Must specify url for requests")
-	}
-	requester := new(httpRequester)
-	requester.pattern = regexp.MustCompile(`(X{2,})`)
-	length := len(requester.pattern.FindString(config.url))
-	requester.patternFormatter = fmt.Sprintf("%%0%dd", length)
-	if mode == "write" {
-		requester.method = "PUT"
-		requester.data = make([]byte, 160*1024, 160*1024)
-	} else {
-		requester.method = "GET"
-	}
-	randc.Read(requester.data)
-	return requester
-}
-
-func (requester *httpRequester) request(channels *OPChannels, request *Request) {
-	print(".")
-	req := fasthttp.AcquireRequest()
-	req.SetRequestURI(requester.pattern.ReplaceAllString(config.url,
-		fmt.Sprintf(requester.patternFormatter,
-			request.num)))
-
-	req.Header.SetMethodBytes([]byte(requester.method))
-	req.Header.Set("Connection", "keep-alive")
-	if requester.data != nil {
-		req.SetBody(requester.data)
-	}
-	start := time.Now()
-	resp := fasthttp.AcquireResponse()
-	timeSpent := time.Since(start)
-	err := requester.client.Do(req, resp)
-	statusCode := resp.StatusCode()
-	fasthttp.ReleaseRequest(req)
-	fasthttp.ReleaseResponse(resp)
-
-	if err != nil {
-		channels.responses <- &Response{request, 0,
-			fmt.Errorf("Bad request: %v", err)}
-	}
-
-	switch statusCode {
-	case fasthttp.StatusOK, fasthttp.StatusCreated:
-		channels.responses <- &Response{request, timeSpent, nil}
-	default:
-		channels.responses <- &Response{request, timeSpent, fmt.Errorf("Error: statusCode")}
-	}
-}
-
 //Operators chosen by config
 type Operators struct {
 	readEmitter   Emitter
@@ -339,6 +150,11 @@ func getOperators(progress *Progress) *Operators {
 		operators.writeEmitter = &threadedEmitter{}
 		operators.readAdjuster = &speedAdjuster{}
 		operators.writeAdjuster = &speedAdjuster{}
+	case ConstantThreads:
+		operators.readEmitter = &threadedEmitter{}
+		operators.writeEmitter = &threadedEmitter{}
+		operators.writeAdjuster = &nullAdjuster{}
+		operators.readAdjuster = &nullAdjuster{}
 	case ConstantRatio:
 		operators.readEmitter = newRateEmitter(config.rps, &progress.writes.goodNums, true)
 		operators.writeEmitter = newRateEmitter(config.wps, nil, false)
@@ -426,9 +242,13 @@ func init() {
 	flag.StringVar(&config.url, "url", "", "Url to submit requests")
 	flag.Parse()
 	if config.writeThreads != 0 || config.readThreads != 0 {
-		config.mode = LowLatency
+		config.mode = ConstantThreads
 	} else if config.wps != 0 || config.rps != 0 {
 		config.mode = ConstantRatio
+	} else {
+		config.writeThreads = 1
+		config.readThreads = 1
+		config.mode = LowLatency
 	}
 }
 
