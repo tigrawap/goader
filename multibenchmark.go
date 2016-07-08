@@ -3,7 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
 	"sort"
+	"syscall"
 	"time"
 )
 
@@ -12,7 +15,7 @@ type Request struct {
 	num int64
 }
 
-// Response of worker
+//Response struct
 type Response struct {
 	request *Request
 	latency time.Duration
@@ -26,25 +29,24 @@ const (
 	ConstantThreads = "constant-threads"
 	Sleep           = "sleep"
 	Upload          = "upload"
+	NotSet          = -1
 )
 
 var config struct {
-	url          string //url/pattern
-	rps          int
-	wps          int
-	writeThreads int
-	readThreads  int
-	rpw          int
-	maxChannels  int
-	maxRequests  int64
-	mode         string
-	engine       string
+	url             string //url/pattern
+	rps             int
+	wps             int
+	writeThreads    int
+	readThreads     int
+	rpw             int
+	maxChannels     int
+	maxRequests     int64
+	mode            string
+	engine          string
+	badResponseTime time.Duration
 }
 
-const badResponseTime = 1000
-
-func startWorker(channels *Channels, progress *Progress, operators *Operators) {
-	// TODO: Ditch progress from here, it's used only for fake worker...
+func startWorker(channels *Channels, operators *Operators) {
 	var request *Request
 	for {
 		select {
@@ -116,13 +118,14 @@ func printResults(state *OPState) {
 	succesful := len(state.goodNums)
 	if succesful > 0 {
 		fmt.Println("Average response time:", state.totalTime/time.Duration(succesful))
-	}
-	if succesful > 0 {
 		sort.Sort(state.latencies)
 		percentiles := []int{95, 90, 80, 70, 60, 50, 40, 30}
 
 		for i := range percentiles {
 			fmt.Println("Percentile ", percentiles[i], percentile(state.latencies, percentiles[i]))
+		}
+		if config.mode == LowLatency {
+			fmt.Printf("Threads with latency below %v: %v\n", config.badResponseTime, state.speed)
 		}
 	}
 
@@ -163,8 +166,8 @@ func getOperators(progress *Progress) *Operators {
 	}
 	switch config.engine {
 	case Sleep:
-		operators.writeRequster = &sleepRequster{&progress.writes}
-		operators.readRequester = &sleepRequster{&progress.reads}
+		operators.writeRequster = newSleepRequster(&progress.writes)
+		operators.readRequester = newSleepRequster(&progress.reads)
 	case Upload:
 		operators.writeRequster = newHTTPRequester("write")
 		operators.readRequester = newHTTPRequester("read")
@@ -172,7 +175,20 @@ func getOperators(progress *Progress) *Operators {
 	return operators
 }
 
+func quitOnInterrupt() chan bool {
+	c := make(chan os.Signal)
+	quit := make(chan bool)
+	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGTERM)
+	go func() {
+		<-c
+		quit <- true
+	}()
+	return quit
+}
+
 func makeLoad() {
+	quit := quitOnInterrupt()
 	channels := Channels{
 		read: OPChannels{
 			responses: make(chan *Response, 100),
@@ -194,17 +210,20 @@ func makeLoad() {
 	operators := getOperators(&progress)
 
 	for i := 0; i < config.maxChannels; i++ {
-		go startWorker(&channels, &progress, operators)
+		go startWorker(&channels, operators)
 	}
+MAIN_LOOP:
 	for {
 		operators.writeEmitter.emitRequests(&channels.write, &progress.writes)
 		operators.readEmitter.emitRequests(&channels.read, &progress.reads)
 		var response *Response
 		select {
+		case <-quit:
+			fmt.Println("\n Stopped by user")
+			break MAIN_LOOP
 		case response = <-channels.write.responses:
 			operators.writeAdjuster.adjust(response, &progress.writes)
 			processResponse(response, &progress.writes)
-			// Got one; nothing more to do.
 		case response = <-channels.read.responses:
 			operators.readAdjuster.adjust(response, &progress.reads)
 			processResponse(response, &progress.reads)
@@ -218,7 +237,8 @@ func makeLoad() {
 		// TODO: Smarter aborter
 		if config.mode == ConstantRatio {
 			if progress.writes.inFlight+progress.reads.inFlight > (config.wps+config.rps)*2 {
-				panic("Could not sustain given rate")
+				fmt.Println("\n Could not sustain given rate")
+				os.Exit(2)
 			}
 		}
 	}
@@ -229,29 +249,39 @@ func makeLoad() {
 	printResults(&progress.writes)
 }
 
-func init() {
-	flag.IntVar(&config.rps, "rps", 0, "Reads per second")
-	flag.IntVar(&config.wps, "wps", 0, "Writes per second")
-	flag.IntVar(&config.writeThreads, "wt", 0, "Write threads")
-	flag.IntVar(&config.readThreads, "rt", 0, "Read threads")
-	flag.IntVar(&config.rpw, "rpw", 10, "Reads per write ratio")
+func configure() {
+	flag.IntVar(&config.rps, "rps", NotSet, "Reads per second")
+	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
+	flag.IntVar(&config.writeThreads, "wt", NotSet, "Write threads")
+	flag.IntVar(&config.readThreads, "rt", NotSet, "Read threads")
+	flag.IntVar(&config.rpw, "rpw", NotSet, "Reads per write ratio")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
 	flag.IntVar(&config.maxChannels, "max-channels", 500, "Maximum threads")
-	flag.StringVar(&config.engine, "requests-engine", Sleep, "s3/sleep/upload")
-	flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
+	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload")
+	flag.DurationVar(&config.badResponseTime, "max-latency", time.Duration(1000*time.Millisecond),
+		"Max latency to allow when searching for maximum thread count")
+	// flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
 	flag.StringVar(&config.url, "url", "", "Url to submit requests")
 	flag.Parse()
-	if config.writeThreads != 0 || config.readThreads != 0 {
+	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
+		panic("OP/s and Threads flags are exclusive")
+	}
+	if config.writeThreads > 0 || config.readThreads > 0 {
 		config.mode = ConstantThreads
-	} else if config.wps != 0 || config.rps != 0 {
+	} else if config.wps > 0 || config.rps > 0 {
 		config.mode = ConstantRatio
 	} else {
-		config.writeThreads = 1
-		config.readThreads = 1
+		if config.writeThreads == NotSet {
+			config.writeThreads = 1
+		}
+		if config.readThreads == NotSet {
+			config.readThreads = 1
+		}
 		config.mode = LowLatency
 	}
 }
 
 func main() {
+	configure()
 	makeLoad()
 }

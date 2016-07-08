@@ -13,6 +13,7 @@ import (
 
 type sleepRequster struct {
 	state *OPState
+	db    chan int
 }
 
 func (requester *sleepRequster) request(channels *OPChannels, request *Request) {
@@ -22,9 +23,20 @@ func (requester *sleepRequster) request(channels *OPChannels, request *Request) 
 		return
 	}
 	print(".")
-	var timeToSleep = time.Duration(requester.state.inFlight*rand.Intn(10)) * time.Millisecond
+	start := time.Now()
+	requester.db <- 0
+	var timeToSleep = time.Duration(rand.Intn(200)) * time.Millisecond
 	time.Sleep(timeToSleep)
-	channels.responses <- &Response{request, timeToSleep, nil}
+	<-requester.db
+	channels.responses <- &Response{request, time.Since(start), nil}
+}
+
+func newSleepRequster(state *OPState) *sleepRequster {
+	r := sleepRequster{
+		state: state,
+		db:    make(chan int, 10),
+	}
+	return &r
 }
 
 type httpRequester struct {
