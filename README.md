@@ -48,6 +48,8 @@ Will maintain 200 read, 30 write threads
 `./multibenchmark -rt=200 -wt=0 --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
 Same, reads only.
 
+In all load patterns if both reads and writes issued reads will use previously written data, if only read pattern used - then incremental filenames (or from urls list file), with reads only it is expected for files/urls to be there
+
 ##### Example output
 ```
 go run src/github.com/tigrawap/multibenchmark/*.go  --requests-engine=sleep --max-requests 500000  -wps=60 -rps=90                               [13:15:25]
@@ -82,7 +84,6 @@ Total requests: 573
 Total errors: 0
 Average OP/s:  60
 ```
-In all load patterns if both reads and writes issued reads will use previously written data, if only read pattern used - then incremental filenames (or from urls list file), with reads only it is expected for files/urls to be there
 
 
 
