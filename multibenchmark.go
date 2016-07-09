@@ -29,6 +29,7 @@ const (
 	ConstantThreads = "constant-threads"
 	Sleep           = "sleep"
 	Upload          = "upload"
+	Null            = "null"
 	NotSet          = -1
 )
 
@@ -36,13 +37,15 @@ var config struct {
 	url             string //url/pattern
 	rps             int
 	wps             int
+	rpw             int
 	writeThreads    int
 	readThreads     int
-	rpw             int
 	maxChannels     int
 	maxRequests     int64
+	bodySize        int
 	mode            string
 	engine          string
+	syncSleep       time.Duration
 	badResponseTime time.Duration
 }
 
@@ -114,7 +117,7 @@ func percentile(numbers timeArray, n int) time.Duration {
 	return numbers[i]
 }
 
-func printResults(state *OPState) {
+func printResults(state *OPState, startTime time.Time) {
 	succesful := len(state.goodNums)
 	if succesful > 0 {
 		fmt.Println("Average response time:", state.totalTime/time.Duration(succesful))
@@ -131,6 +134,7 @@ func printResults(state *OPState) {
 
 	fmt.Println("Total requests:", state.done)
 	fmt.Println("Total errors:", state.errors)
+	fmt.Println("Average OP/s: ", int64(float64(state.done*1000000000)/float64(time.Since(startTime).Nanoseconds())) + 1)
 	fmt.Println()
 	fmt.Println()
 }
@@ -151,15 +155,22 @@ func getOperators(progress *Progress) *Operators {
 	case LowLatency:
 		operators.readEmitter = &threadedEmitter{}
 		operators.writeEmitter = &threadedEmitter{}
-		operators.readAdjuster = &speedAdjuster{}
-		operators.writeAdjuster = &speedAdjuster{}
+		if config.writeThreads != 0 {
+			operators.readAdjuster = &boundAdjuster{
+				boundTo: &progress.writes.speed,
+				boundBy: &config.rpw,
+			}
+		} else {
+			operators.readAdjuster = &latencyAdjuster{}
+		}
+		operators.writeAdjuster = &latencyAdjuster{}
 	case ConstantThreads:
 		operators.readEmitter = &threadedEmitter{}
 		operators.writeEmitter = &threadedEmitter{}
 		operators.writeAdjuster = &nullAdjuster{}
 		operators.readAdjuster = &nullAdjuster{}
 	case ConstantRatio:
-		operators.readEmitter = newRateEmitter(config.rps, &progress.writes.goodNums, true)
+		operators.readEmitter = newRateEmitter(config.rps, &progress.writes.goodNums, config.writeThreads > 0)
 		operators.writeEmitter = newRateEmitter(config.wps, nil, false)
 		operators.writeAdjuster = &nullAdjuster{}
 		operators.readAdjuster = &nullAdjuster{}
@@ -171,6 +182,11 @@ func getOperators(progress *Progress) *Operators {
 	case Upload:
 		operators.writeRequster = newHTTPRequester("write")
 		operators.readRequester = newHTTPRequester("read")
+	case Null:
+		operators.writeRequster = &nullRequester{}
+		operators.readRequester = &nullRequester{}
+	default:
+		panic("Unknown engine")
 	}
 	return operators
 }
@@ -192,10 +208,10 @@ func makeLoad() {
 	channels := Channels{
 		read: OPChannels{
 			responses: make(chan *Response, 100),
-			requests:  make(chan *Request, 1000)},
+			requests:  make(chan *Request, config.maxChannels*2)},
 		write: OPChannels{
 			responses: make(chan *Response, 100),
-			requests:  make(chan *Request, 1000)},
+			requests:  make(chan *Request, config.maxChannels*2)},
 	}
 	progress := Progress{
 		writes: OPState{
@@ -209,9 +225,10 @@ func makeLoad() {
 	progress.writes.speed = config.writeThreads
 	operators := getOperators(&progress)
 
-	for i := 0; i < config.maxChannels; i++ {
+	for i := 0; i < config.maxChannels*2; i++ {
 		go startWorker(&channels, operators)
 	}
+	startTime := time.Now()
 MAIN_LOOP:
 	for {
 		operators.writeEmitter.emitRequests(&channels.write, &progress.writes)
@@ -228,7 +245,7 @@ MAIN_LOOP:
 			operators.readAdjuster.adjust(response, &progress.reads)
 			processResponse(response, &progress.reads)
 		default:
-			time.Sleep(1 * time.Millisecond)
+			time.Sleep(config.syncSleep)
 		}
 		if progress.reads.done+progress.writes.done > config.maxRequests {
 			fmt.Println("Exceeded maximum requests count")
@@ -244,9 +261,9 @@ MAIN_LOOP:
 	}
 
 	fmt.Println("Reads:")
-	printResults(&progress.reads)
+	printResults(&progress.reads, startTime)
 	fmt.Println("Writes:")
-	printResults(&progress.writes)
+	printResults(&progress.writes, startTime)
 }
 
 func configure() {
@@ -254,9 +271,10 @@ func configure() {
 	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
 	flag.IntVar(&config.writeThreads, "wt", NotSet, "Write threads")
 	flag.IntVar(&config.readThreads, "rt", NotSet, "Read threads")
-	flag.IntVar(&config.rpw, "rpw", NotSet, "Reads per write ratio")
+	flag.IntVar(&config.rpw, "rpw", 1, "Reads per write in search-for maximum mode")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
 	flag.IntVar(&config.maxChannels, "max-channels", 500, "Maximum threads")
+	flag.IntVar(&config.bodySize, "body-size", 1024*160, "Body size for put requests, in bytes")
 	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload")
 	flag.DurationVar(&config.badResponseTime, "max-latency", time.Duration(1000*time.Millisecond),
 		"Max latency to allow when searching for maximum thread count")
@@ -264,7 +282,7 @@ func configure() {
 	flag.StringVar(&config.url, "url", "", "Url to submit requests")
 	flag.Parse()
 	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
-		panic("OP/s and Threads flags are exclusive")
+		fmt.Println("OP/s and Threads flags are exclusive")
 	}
 	if config.writeThreads > 0 || config.readThreads > 0 {
 		config.mode = ConstantThreads
@@ -278,6 +296,12 @@ func configure() {
 			config.readThreads = 1
 		}
 		config.mode = LowLatency
+	}
+	switch config.mode {
+	case Null:
+		config.syncSleep = time.Nanosecond
+	default:
+		config.syncSleep = 1000 * time.Nanosecond
 	}
 }
 

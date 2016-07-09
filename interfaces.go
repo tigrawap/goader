@@ -1,6 +1,7 @@
 package main
 
-// Emitter of requests
+// Emitter produce requests, they should be high efficient,
+// since called after every completed request and periodically
 type Emitter interface {
 	emitRequests(channels *OPChannels, state *OPState)
 }

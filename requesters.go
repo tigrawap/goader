@@ -11,6 +11,13 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+type nullRequester struct {
+}
+
+func (n *nullRequester) request(channels *OPChannels, request *Request) {
+	channels.responses <- &Response{request, time.Nanosecond, nil}
+}
+
 type sleepRequster struct {
 	state *OPState
 	db    chan int
@@ -57,7 +64,7 @@ func newHTTPRequester(mode string) *httpRequester {
 	requester.patternFormatter = fmt.Sprintf("%%0%dd", length)
 	if mode == "write" {
 		requester.method = "PUT"
-		requester.data = make([]byte, 160*1024, 160*1024)
+		requester.data = make([]byte, config.bodySize)
 	} else {
 		requester.method = "GET"
 	}

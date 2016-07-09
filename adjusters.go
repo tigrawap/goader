@@ -8,13 +8,26 @@ type nullAdjuster struct {
 func (adjuster *nullAdjuster) adjust(response *Response, state *OPState) {
 }
 
-type speedAdjuster struct {
+type latencyAdjuster struct {
 	movingCount int
 	avgTime     time.Duration
 	movingTime  time.Duration
 }
 
-func (adjuster *speedAdjuster) adjust(response *Response, state *OPState) {
+type boundAdjuster struct {
+	boundTo *int
+	boundBy *int
+}
+
+func (adjuster *boundAdjuster) adjust(response *Response, state *OPState) {
+	state.speed = *adjuster.boundTo * *adjuster.boundBy
+	if state.speed > config.maxChannels {
+		state.speed = config.maxChannels
+	}
+	return
+}
+
+func (adjuster *latencyAdjuster) adjust(response *Response, state *OPState) {
 	adjuster.movingCount++
 	adjuster.avgTime += response.latency
 	if adjuster.movingCount == 5 {
@@ -24,7 +37,9 @@ func (adjuster *speedAdjuster) adjust(response *Response, state *OPState) {
 				state.speed--
 			}
 		} else {
-			state.speed++
+			if state.speed < config.maxChannels {
+				state.speed++
+			}
 		}
 		adjuster.movingCount = 0
 		adjuster.avgTime = 0
