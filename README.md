@@ -22,6 +22,7 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 - Simple url template, http://localhost/post/XXXXX. XXXXX will be replaced by incremental integers, (number of Xs>2)
 
 `Request engines`  
+- `null` Does nothing, useful for testing utility itself. At the moment reaches 700k requests per/sec  
 - `sleep` Requster. For testing, sleeps instead of making real requests, also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life 
 - `upload` Uploads (by PUT) and GET files (done, default engine).  
 - `http` Planned. Simple single variable method http tester. Planned to support url template or weighted urls files list   

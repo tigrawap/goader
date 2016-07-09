@@ -95,6 +95,7 @@ func (requester *httpRequester) request(channels *OPChannels, request *Request) 
 	if err != nil {
 		channels.responses <- &Response{request, 0,
 			fmt.Errorf("Bad request: %v", err)}
+		return
 	}
 
 	switch statusCode {

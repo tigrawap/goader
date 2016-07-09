@@ -170,7 +170,7 @@ func getOperators(progress *Progress) *Operators {
 		operators.writeAdjuster = &nullAdjuster{}
 		operators.readAdjuster = &nullAdjuster{}
 	case ConstantRatio:
-		operators.readEmitter = newRateEmitter(config.rps, &progress.writes.goodNums, config.writeThreads > 0)
+		operators.readEmitter = newRateEmitter(config.rps, &progress.writes.goodNums, config.wps > 0)
 		operators.writeEmitter = newRateEmitter(config.wps, nil, false)
 		operators.writeAdjuster = &nullAdjuster{}
 		operators.readAdjuster = &nullAdjuster{}
