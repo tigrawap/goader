@@ -1,4 +1,4 @@
-### Multibenchmark intro
+### Goader intro
 
 Why another benchmarks utility?
 All known to me utilities have several of this flows:
@@ -30,30 +30,30 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 - `disk` planned, should support variable block size and O_DIRECT mode
    
 ### Examples  
-`./multibenchmark -rps=30 -wps=30 --requests-engine=upload -url=http://127.0.0.1/post/XXXXX`  
+`./goader -rps=30 -wps=30 --requests-engine=upload -url=http://127.0.0.1/post/XXXXX`  
 Will maintain 30 writes, 30 reads per second, aborts if cannot maintain such rate, incrementaly increases url(http://127.0.0.1/post/00001, http://127.0.0.1/post/00002 ...)
 
-`./multibenchmark --max-latency=300ms --requests-engine=upload -url="http://127.0.0.1/post/XXX"`
+`./goader --max-latency=300ms --requests-engine=upload -url="http://127.0.0.1/post/XXX"`
 Will increase load gradually until reaching specified latency, useful for determining maximum throughput
 
-`./multibenchmark --max-latency=300ms -rt=0 --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
+`./goader --max-latency=300ms -rt=0 --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
 Same, but uploads only, no GETs
 
-`./multibenchmark -rpt=10 --max-latency=300ms --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
+`./goader -rpt=10 --max-latency=300ms --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
 Will search for best PUT latency with read to write ratio 10, defaults to 1.
 Maximum PUTs threads also limited by max-channels param, defaults to 500
 
-`./multibenchmark -rt=200 -wt=30 --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
+`./goader -rt=200 -wt=30 --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
 Will maintain 200 read, 30 write threads
 
-`./multibenchmark -rt=200 -wt=0 --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
+`./goader -rt=200 -wt=0 --requests-engine=upload -url="http://127.0.0.1/post/XXXXX"`
 Same, reads only.
 
 In all load patterns if both reads and writes issued reads will use previously written data, if only read pattern used - then incremental filenames (or from urls list file), with reads only it is expected for files/urls to be there
 
 ##### Example output
 ```
-go run src/github.com/tigrawap/multibenchmark/*.go  --requests-engine=sleep --max-requests 500000  -wps=60 -rps=90                               [13:15:25]
+go run src/github.com/tigrawap/goader/*.go  --requests-engine=sleep --max-requests 500000  -wps=60 -rps=90                               [13:15:25]
 .....................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................^C
  Stopped by user
 Reads:
