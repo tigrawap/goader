@@ -266,6 +266,38 @@ MAIN_LOOP:
 	printResults(&progress.writes, startTime)
 }
 
+func validateParams(){
+	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
+		fmt.Println("OP/s and Threads flags are exclusive")
+	}
+}
+
+func selectMode(){
+	if config.writeThreads > 0 || config.readThreads > 0 {
+		config.mode = ConstantThreads
+	} else if config.wps > 0 || config.rps > 0 {
+		config.mode = ConstantRatio
+	} else {
+		config.mode = LowLatency
+	}
+}
+
+func configureMode(){
+	switch config.mode {
+	case Null:
+		config.syncSleep = time.Nanosecond
+	case LowLatency:
+		if config.writeThreads == NotSet {
+			config.writeThreads = 1
+		}
+		if config.readThreads == NotSet {
+			config.readThreads = 1
+		}
+	default:
+		config.syncSleep = 1000 * time.Nanosecond
+	}
+}
+
 func configure() {
 	flag.IntVar(&config.rps, "rps", NotSet, "Reads per second")
 	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
@@ -281,28 +313,10 @@ func configure() {
 	// flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
 	flag.StringVar(&config.url, "url", "", "Url to submit requests")
 	flag.Parse()
-	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
-		fmt.Println("OP/s and Threads flags are exclusive")
-	}
-	if config.writeThreads > 0 || config.readThreads > 0 {
-		config.mode = ConstantThreads
-	} else if config.wps > 0 || config.rps > 0 {
-		config.mode = ConstantRatio
-	} else {
-		if config.writeThreads == NotSet {
-			config.writeThreads = 1
-		}
-		if config.readThreads == NotSet {
-			config.readThreads = 1
-		}
-		config.mode = LowLatency
-	}
-	switch config.mode {
-	case Null:
-		config.syncSleep = time.Nanosecond
-	default:
-		config.syncSleep = 1000 * time.Nanosecond
-	}
+	validateParams()
+	selectMode()
+	configureMode()
+
 }
 
 func main() {
