@@ -1,12 +1,17 @@
 package main
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 type nullAdjuster struct {
 }
 
 func (adjuster *nullAdjuster) adjust(response *Response, state *OPState) {
 }
+
+var logbase = 1 / math.Log(1.3)
 
 type latencyAdjuster struct {
 	movingCount int
@@ -29,10 +34,15 @@ func (adjuster *boundAdjuster) adjust(response *Response, state *OPState) {
 
 func (adjuster *latencyAdjuster) adjust(response *Response, state *OPState) {
 	adjuster.movingCount++
-	adjuster.avgTime += response.latency
-	if adjuster.movingCount == 5 {
-		adjuster.movingTime = adjuster.avgTime / 5
-		if response.err != nil || adjuster.movingTime >= config.badResponseTime {
+	sample := int(math.Log(float64(state.speed)) * logbase)
+	if response.err != nil {
+		adjuster.avgTime += config.badResponseTime * time.Duration(sample)
+	} else {
+		adjuster.avgTime += response.latency
+	}
+	if adjuster.movingCount >= sample {
+		adjuster.movingTime = adjuster.avgTime / time.Duration(adjuster.movingCount)
+		if adjuster.movingTime >= config.badResponseTime {
 			if state.speed > 1 {
 				state.speed--
 			}
