@@ -266,13 +266,13 @@ MAIN_LOOP:
 	printResults(&progress.writes, startTime)
 }
 
-func validateParams(){
+func validateParams() {
 	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
 		fmt.Println("OP/s and Threads flags are exclusive")
 	}
 }
 
-func selectMode(){
+func selectMode() {
 	if config.writeThreads > 0 || config.readThreads > 0 {
 		config.mode = ConstantThreads
 	} else if config.wps > 0 || config.rps > 0 {
@@ -282,7 +282,7 @@ func selectMode(){
 	}
 }
 
-func configureMode(){
+func configureMode() {
 	switch config.mode {
 	case Null:
 		config.syncSleep = time.Nanosecond

@@ -73,7 +73,6 @@ func newHTTPRequester(mode string) *httpRequester {
 }
 
 func (requester *httpRequester) request(channels *OPChannels, request *Request) {
-	print(".")
 	req := fasthttp.AcquireRequest()
 	req.SetRequestURI(requester.pattern.ReplaceAllString(config.url,
 		fmt.Sprintf(requester.patternFormatter,
@@ -93,15 +92,18 @@ func (requester *httpRequester) request(channels *OPChannels, request *Request) 
 	fasthttp.ReleaseResponse(resp)
 
 	if err != nil {
-		channels.responses <- &Response{request, 0,
+		print("E")
+		channels.responses <- &Response{request, timeSpent,
 			fmt.Errorf("Bad request: %v", err)}
 		return
 	}
 
 	switch statusCode {
 	case fasthttp.StatusOK, fasthttp.StatusCreated:
+		print(".")
 		channels.responses <- &Response{request, timeSpent, nil}
 	default:
+		print("E")
 		channels.responses <- &Response{request, timeSpent, fmt.Errorf("Error: statusCode")}
 	}
 }
