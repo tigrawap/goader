@@ -143,6 +143,7 @@ func printResults(state *OPState, startTime time.Time) {
 	fmt.Println("Total requests:", state.done)
 	fmt.Println("Total errors:", state.errors)
 	fmt.Println("Average OP/s: ", int64(float64(state.done*int64(time.Second))/float64(time.Since(startTime).Nanoseconds()))+1)
+	fmt.Println("Average good OP/s: ", int64(float64((state.done-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds()))+1)
 	fmt.Println()
 	fmt.Println()
 }
