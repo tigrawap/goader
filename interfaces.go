@@ -8,10 +8,15 @@ type Emitter interface {
 
 //Adjuster should decide whether change throughput based on response
 type Adjuster interface {
-	adjust(response *Response, state *OPState)
+	adjust(response *Response)
 }
 
 //Requester does actual requests to server/fs
 type Requester interface {
 	request(channels *OPChannels, request *Request)
+}
+
+//Target supplies requester with num of file/template
+type Target interface {
+	get() int64
 }

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"syscall"
 	"time"
+
+	"github.com/mgutz/ansi"
 )
 
 //Request struct
@@ -50,13 +52,12 @@ var config struct {
 }
 
 func startWorker(channels *Channels, operators *Operators) {
-	var request *Request
 	for {
 		select {
-		case request = <-channels.read.requests:
-			operators.readRequester.request(&channels.read, request)
-		case request = <-channels.write.requests:
-			operators.writeRequster.request(&channels.write, request)
+		case <-channels.read.requests:
+			operators.readRequester.request(&channels.read, &Request{operators.readTarget.get()})
+		case <-channels.write.requests:
+			operators.writeRequster.request(&channels.write, &Request{operators.writeTarget.get()})
 		}
 	}
 }
@@ -64,7 +65,7 @@ func startWorker(channels *Channels, operators *Operators) {
 //OPChannels hold channels for communication for specific operation
 type OPChannels struct {
 	responses chan *Response
-	requests  chan *Request
+	requests  chan int
 }
 
 //Channels for communication per op
@@ -72,6 +73,12 @@ type Channels struct {
 	read  OPChannels
 	write OPChannels
 }
+type op int
+
+const (
+	READ op = iota
+	WRITE
+)
 
 //OPState contains state for OP(READ/WRITE)
 type OPState struct {
@@ -79,10 +86,11 @@ type OPState struct {
 	done      int64
 	errors    int64
 	inFlight  int
-	num       int64
 	goodNums  []int64
+	op        op
 	latencies timeArray
 	totalTime time.Duration
+	colored   func(string) string
 }
 
 // Progress of benchmark
@@ -147,6 +155,8 @@ type Operators struct {
 	writeAdjuster Adjuster
 	readRequester Requester
 	writeRequster Requester
+	readTarget    Target
+	writeTarget   Target
 }
 
 func getOperators(progress *Progress) *Operators {
@@ -159,19 +169,20 @@ func getOperators(progress *Progress) *Operators {
 			operators.readAdjuster = &boundAdjuster{
 				boundTo: &progress.writes.speed,
 				boundBy: &config.rpw,
+				state:   &progress.reads,
 			}
 		} else {
-			operators.readAdjuster = &latencyAdjuster{}
+			operators.readAdjuster = newLatencyAdjuster(&progress.reads)
 		}
-		operators.writeAdjuster = &latencyAdjuster{}
+		operators.writeAdjuster = newLatencyAdjuster(&progress.writes)
 	case ConstantThreads:
 		operators.readEmitter = &threadedEmitter{}
 		operators.writeEmitter = &threadedEmitter{}
 		operators.writeAdjuster = &nullAdjuster{}
 		operators.readAdjuster = &nullAdjuster{}
 	case ConstantRatio:
-		operators.readEmitter = newRateEmitter(config.rps, &progress.writes.goodNums, config.wps > 0)
-		operators.writeEmitter = newRateEmitter(config.wps, nil, false)
+		operators.readEmitter = newRateEmitter(config.rps)
+		operators.writeEmitter = newRateEmitter(config.wps)
 		operators.writeAdjuster = &nullAdjuster{}
 		operators.readAdjuster = &nullAdjuster{}
 	}
@@ -180,13 +191,21 @@ func getOperators(progress *Progress) *Operators {
 		operators.writeRequster = newSleepRequster(&progress.writes)
 		operators.readRequester = newSleepRequster(&progress.reads)
 	case Upload:
-		operators.writeRequster = newHTTPRequester("write")
-		operators.readRequester = newHTTPRequester("read")
+		operators.writeRequster = newHTTPRequester(&progress.writes)
+		operators.readRequester = newHTTPRequester(&progress.reads)
 	case Null:
 		operators.writeRequster = &nullRequester{}
 		operators.readRequester = &nullRequester{}
 	default:
 		panic("Unknown engine")
+	}
+	operators.writeTarget = newIncrementalTarget()
+	if config.wps > 0 || config.writeThreads > 0 {
+		operators.readTarget = &BoundTarget{
+			bound: &progress.writes.goodNums,
+		}
+	} else {
+		operators.readTarget = newIncrementalTarget()
 	}
 	return operators
 }
@@ -203,22 +222,46 @@ func quitOnInterrupt() chan bool {
 	return quit
 }
 
+var pb = make(chan string, 1000)
+
+func printer(quit chan bool) {
+	for {
+		select {
+		case <-quit:
+			println()
+			return
+		case s := <-pb:
+			print(s)
+		}
+	}
+}
+
+func p(s string) {
+	pb <- s
+}
+
 func makeLoad() {
 	quit := quitOnInterrupt()
+	stopPrinter := make(chan bool)
+	go printer(stopPrinter)
 	channels := Channels{
 		read: OPChannels{
 			responses: make(chan *Response, 100),
-			requests:  make(chan *Request, config.maxChannels*2)},
+			requests:  make(chan int, config.maxChannels*2)},
 		write: OPChannels{
 			responses: make(chan *Response, 100),
-			requests:  make(chan *Request, config.maxChannels*2)},
+			requests:  make(chan int, config.maxChannels*2)},
 	}
 	progress := Progress{
 		writes: OPState{
+			op:       WRITE,
 			goodNums: make([]int64, 0, config.maxRequests),
+			colored:  ansi.ColorFunc("blue+h:black"),
 		},
 		reads: OPState{
+			op:       READ,
 			goodNums: make([]int64, 0, config.maxRequests),
+			colored:  ansi.ColorFunc("green+h:black"),
 		},
 	}
 	progress.reads.speed = config.readThreads
@@ -236,30 +279,34 @@ MAIN_LOOP:
 		var response *Response
 		select {
 		case <-quit:
+			stopPrinter <- true
 			fmt.Println("\n Stopped by user")
 			break MAIN_LOOP
 		case response = <-channels.write.responses:
-			operators.writeAdjuster.adjust(response, &progress.writes)
+			operators.writeAdjuster.adjust(response)
 			processResponse(response, &progress.writes)
 		case response = <-channels.read.responses:
-			operators.readAdjuster.adjust(response, &progress.reads)
+			operators.readAdjuster.adjust(response)
 			processResponse(response, &progress.reads)
 		default:
 			time.Sleep(config.syncSleep)
 		}
 		if progress.reads.done+progress.writes.done > config.maxRequests {
+			stopPrinter <- true
 			fmt.Println("Exceeded maximum requests count")
 			break
 		}
 		// TODO: Smarter aborter
 		if config.mode == ConstantRatio {
 			if progress.writes.inFlight+progress.reads.inFlight > (config.wps+config.rps)*2 {
+				stopPrinter <- true
 				fmt.Println("\n Could not sustain given rate")
 				os.Exit(2)
 			}
 		}
 	}
 
+	println()
 	fmt.Println("Reads:")
 	printResults(&progress.reads, startTime)
 	fmt.Println("Writes:")

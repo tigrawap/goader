@@ -8,7 +8,7 @@ import (
 type nullAdjuster struct {
 }
 
-func (adjuster *nullAdjuster) adjust(response *Response, state *OPState) {
+func (adjuster *nullAdjuster) adjust(response *Response) {
 }
 
 var logbase = 1 / math.Log(1.3)
@@ -17,41 +17,53 @@ type latencyAdjuster struct {
 	movingCount int
 	avgTime     time.Duration
 	movingTime  time.Duration
+	state       *OPState
 }
 
 type boundAdjuster struct {
 	boundTo *int
 	boundBy *int
+	state   *OPState
 }
 
-func (adjuster *boundAdjuster) adjust(response *Response, state *OPState) {
-	state.speed = *adjuster.boundTo * *adjuster.boundBy
-	if state.speed > config.maxChannels {
-		state.speed = config.maxChannels
+func (a *boundAdjuster) adjust(response *Response) {
+	a.state.speed = *a.boundTo * *a.boundBy
+	if a.state.speed > config.maxChannels {
+		a.state.speed = config.maxChannels
 	}
 	return
 }
 
-func (adjuster *latencyAdjuster) adjust(response *Response, state *OPState) {
-	adjuster.movingCount++
-	sample := int(math.Log(float64(state.speed)) * logbase)
+const arrowUp = `↗`
+const arrowDown = `↘`
+
+func newLatencyAdjuster(state *OPState) *latencyAdjuster {
+	a := latencyAdjuster{state: state}
+	return &a
+}
+
+func (a *latencyAdjuster) adjust(response *Response) {
+	a.movingCount++
+	sample := int(math.Log(float64(a.state.speed)) * logbase)
 	if response.err != nil {
-		adjuster.avgTime += config.badResponseTime * time.Duration(sample)
+		a.avgTime += config.badResponseTime * time.Duration(sample)
 	} else {
-		adjuster.avgTime += response.latency
+		a.avgTime += response.latency
 	}
-	if adjuster.movingCount >= sample {
-		adjuster.movingTime = adjuster.avgTime / time.Duration(adjuster.movingCount)
-		if adjuster.movingTime >= config.badResponseTime {
-			if state.speed > 1 {
-				state.speed--
+	if a.movingCount >= sample {
+		a.movingTime = a.avgTime / time.Duration(a.movingCount)
+		if a.movingTime >= config.badResponseTime {
+			if a.state.speed > 1 {
+				p(a.state.colored(arrowDown))
+				a.state.speed--
 			}
 		} else {
-			if state.speed < config.maxChannels {
-				state.speed++
+			if a.state.speed < config.maxChannels {
+				p(a.state.colored(arrowUp))
+				a.state.speed++
 			}
 		}
-		adjuster.movingCount = 0
-		adjuster.avgTime = 0
+		a.movingCount = 0
+		a.avgTime = 0
 	}
 }

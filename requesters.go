@@ -25,11 +25,11 @@ type sleepRequster struct {
 
 func (requester *sleepRequster) request(channels *OPChannels, request *Request) {
 	if rand.Intn(10000)-requester.state.inFlight < 0 {
-		print("Error")
+		p(requester.state.colored("E"))
 		channels.responses <- &Response{request, 0, errors.New("Bad response")}
 		return
 	}
-	print(".")
+	p(requester.state.colored("."))
 	start := time.Now()
 	requester.db <- 0
 	var timeToSleep = time.Duration(rand.Intn(200)) * time.Millisecond
@@ -52,24 +52,28 @@ type httpRequester struct {
 	method           string
 	pattern          *regexp.Regexp
 	patternFormatter string
+	state            *OPState
 }
 
-func newHTTPRequester(mode string) *httpRequester {
+func newHTTPRequester(state *OPState) *httpRequester {
 	if config.url == "" {
 		panic("Must specify url for requests")
 	}
-	requester := new(httpRequester)
+	requester := httpRequester{
+		state: state,
+	}
 	requester.pattern = regexp.MustCompile(`(X{2,})`)
 	length := len(requester.pattern.FindString(config.url))
 	requester.patternFormatter = fmt.Sprintf("%%0%dd", length)
-	if mode == "write" {
+	requester.state = state
+	if state.op == WRITE {
 		requester.method = "PUT"
 		requester.data = make([]byte, config.bodySize)
 	} else {
 		requester.method = "GET"
 	}
 	randc.Read(requester.data)
-	return requester
+	return &requester
 }
 
 func (requester *httpRequester) request(channels *OPChannels, request *Request) {
@@ -92,7 +96,7 @@ func (requester *httpRequester) request(channels *OPChannels, request *Request) 
 	fasthttp.ReleaseResponse(resp)
 
 	if err != nil {
-		print("E")
+		p(requester.state.colored("E"))
 		channels.responses <- &Response{request, timeSpent,
 			fmt.Errorf("Bad request: %v", err)}
 		return
@@ -100,10 +104,10 @@ func (requester *httpRequester) request(channels *OPChannels, request *Request) 
 
 	switch statusCode {
 	case fasthttp.StatusOK, fasthttp.StatusCreated:
-		print(".")
+		p(requester.state.colored("."))
 		channels.responses <- &Response{request, timeSpent, nil}
 	default:
-		print("E")
+		p(requester.state.colored("E"))
 		channels.responses <- &Response{request, timeSpent, fmt.Errorf("Error: statusCode")}
 	}
 }
