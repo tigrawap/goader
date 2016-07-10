@@ -69,10 +69,10 @@ func newHTTPRequester(state *OPState) *httpRequester {
 	if state.op == WRITE {
 		requester.method = "PUT"
 		requester.data = make([]byte, config.bodySize)
+		randc.Read(requester.data)
 	} else {
 		requester.method = "GET"
 	}
-	randc.Read(requester.data)
 	return &requester
 }
 
