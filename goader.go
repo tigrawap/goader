@@ -127,6 +127,9 @@ func percentile(numbers timeArray, n int) time.Duration {
 
 func printResults(state *OPState, startTime time.Time) {
 	succesful := len(state.goodNums)
+	if state.done == 0 {
+		return
+	}
 	if succesful > 0 {
 		fmt.Println("Average response time:", state.totalTime/time.Duration(succesful))
 		sort.Sort(state.latencies)
