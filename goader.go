@@ -130,6 +130,11 @@ func printResults(state *OPState, startTime time.Time) {
 	if state.done == 0 {
 		return
 	}
+	if state.op == WRITE {
+		println("Writes:")
+	} else {
+		println("Reads:")
+	}
 	if succesful > 0 {
 		fmt.Println("Average response time:", state.totalTime/time.Duration(succesful))
 		sort.Sort(state.latencies)
@@ -311,9 +316,7 @@ MAIN_LOOP:
 	}
 
 	println()
-	fmt.Println("Reads:")
 	printResults(&progress.reads, startTime)
-	fmt.Println("Writes:")
 	printResults(&progress.writes, startTime)
 }
 
