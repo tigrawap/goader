@@ -36,6 +36,7 @@ func (a *boundAdjuster) adjust(response *Response) {
 
 const arrowUp = `↗`
 const arrowDown = `↘`
+const thresholdPercent = 5
 
 func newLatencyAdjuster(state *OPState) *latencyAdjuster {
 	a := latencyAdjuster{state: state}
@@ -52,12 +53,12 @@ func (a *latencyAdjuster) adjust(response *Response) {
 	}
 	if a.movingCount >= sample {
 		a.movingTime = a.avgTime / time.Duration(a.movingCount)
-		if a.movingTime >= config.badResponseTime {
+		if a.movingTime >= config.badResponseTime/100*(100+thresholdPercent) {
 			if a.state.speed > 1 {
 				p(a.state.colored(arrowDown))
 				a.state.speed--
 			}
-		} else {
+		} else if a.movingTime <= config.badResponseTime/100*(100-thresholdPercent){
 			if a.state.speed < config.maxChannels {
 				p(a.state.colored(arrowUp))
 				a.state.speed++
