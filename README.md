@@ -20,14 +20,20 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 ### Features
 - Extendable architecture with support of multiple request engines
 - Simple url template, http://localhost/post/XXXXX. XXXXX will be replaced by incremental integers, (number of Xs>2)
+- Supports different output formatters, atm human|readable
 
-`Request engines`  
+#####Request engines  
+`--requests-engine=`  
 - `null` Does nothing, useful for testing utility itself. At the moment reaches 700k requests per/sec  
 - `sleep` Requster. For testing, sleeps instead of making real requests, also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life 
 - `upload` Uploads (by PUT) and GET files (done, default engine).  
 - `http` Planned. Simple single variable method http tester. Planned to support url template or weighted urls files list   
 - `s3` planned, to test self hosted object storage with s3 interface  
 - `disk` planned, should support variable block size and O_DIRECT mode
+##### Output formatters
+`--output=`  
+- `human` Default, human readable output, also displays real time progress  
+- `json` Outputs results as json for automatic use by other processes  
    
 ### Examples  
 `./goader -rps=30 -wps=30 --requests-engine=upload -url=http://127.0.0.1/post/XXXXX`  
