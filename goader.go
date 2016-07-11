@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mgutz/ansi"
+	"strconv"
 )
 
 //Request struct
@@ -33,6 +34,8 @@ const (
 	Upload          = "upload"
 	Null            = "null"
 	NotSet          = -1
+	FormatHuman     = "human"
+	FormatJson      = "json"
 )
 
 var config struct {
@@ -47,8 +50,29 @@ var config struct {
 	bodySize        int
 	mode            string
 	engine          string
+	outputFormat    string
+	output          Output
 	syncSleep       time.Duration
 	badResponseTime time.Duration
+}
+
+//OPResults result of specific operation, lately can be printed by different outputters
+type OPResults struct {
+	Errors         int64
+	Done           int64
+	AverageOps     int64
+	AverageGoodOps int64
+	FinalSpeed     int
+	AverageSpeed   time.Duration
+	Percentiles    map[string]time.Duration
+}
+
+type Results struct {
+	Writes    OPResults
+	Reads     OPResults
+	Errors    []string
+	Reports   []string
+	StartTime time.Time
 }
 
 func startWorker(channels *Channels, operators *Operators) {
@@ -125,35 +149,27 @@ func percentile(numbers timeArray, n int) time.Duration {
 	return numbers[i]
 }
 
-func printResults(state *OPState, startTime time.Time) {
+func fillResults(results *OPResults, state *OPState, startTime time.Time) {
+	results.Percentiles = make(map[string]time.Duration)
 	succesful := len(state.goodNums)
-	if state.done == 0 {
-		return
-	}
-	if state.op == WRITE {
-		println("Writes:")
-	} else {
-		println("Reads:")
-	}
 	if succesful > 0 {
-		fmt.Println("Average response time:", state.totalTime/time.Duration(succesful))
+		results.AverageSpeed = state.totalTime / time.Duration(succesful)
 		sort.Sort(state.latencies)
 		percentiles := []int{95, 90, 80, 70, 60, 50, 40, 30}
 
 		for i := range percentiles {
-			fmt.Println("Percentile ", percentiles[i], percentile(state.latencies, percentiles[i]))
+			s := strconv.Itoa(percentiles[i])
+			results.Percentiles[s] = percentile(state.latencies, percentiles[i])
 		}
 		if config.mode == LowLatency {
-			fmt.Printf("Threads with latency below %v: %v\n", config.badResponseTime, state.speed)
+			results.FinalSpeed = state.speed
 		}
 	}
 
-	fmt.Println("Total requests:", state.done)
-	fmt.Println("Total errors:", state.errors)
-	fmt.Println("Average OP/s: ", int64(float64(state.done*int64(time.Second))/float64(time.Since(startTime).Nanoseconds()))+1)
-	fmt.Println("Average good OP/s: ", int64(float64((state.done-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds()))+1)
-	fmt.Println()
-	fmt.Println()
+	results.Done = state.done
+	results.Errors = state.errors
+	results.AverageOps = int64(float64(state.done*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
+	results.AverageGoodOps = int64(float64((state.done-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
 }
 
 //Operators chosen by config
@@ -231,28 +247,23 @@ func quitOnInterrupt() chan bool {
 	return quit
 }
 
-var pb = make(chan string, 1000)
-
-func printer(quit chan bool) {
-	for {
-		select {
-		case <-quit:
-			println()
-			return
-		case s := <-pb:
-			print(s)
-		}
-	}
+func p(s string) {
+	config.output.progress(s)
 }
 
-func p(s string) {
-	pb <- s
+//TODO: Don't really like this global variables, methods on result, global config. Need to rethink
+func (r *Results) error(s string) {
+	r.Errors = append(r.Errors, s)
+	config.output.error(s)
+}
+
+func (r *Results) report(s string) {
+	r.Reports = append(r.Reports, s)
+	config.output.report(s)
 }
 
 func makeLoad() {
 	quit := quitOnInterrupt()
-	stopPrinter := make(chan bool)
-	go printer(stopPrinter)
 	channels := Channels{
 		read: OPChannels{
 			responses: make(chan *Response, 100),
@@ -280,7 +291,9 @@ func makeLoad() {
 	for i := 0; i < config.maxChannels*2; i++ {
 		go startWorker(&channels, operators)
 	}
-	startTime := time.Now()
+	results := Results{
+		StartTime: time.Now(),
+	}
 MAIN_LOOP:
 	for {
 		operators.writeEmitter.emitRequests(&channels.write, &progress.writes)
@@ -288,8 +301,7 @@ MAIN_LOOP:
 		var response *Response
 		select {
 		case <-quit:
-			stopPrinter <- true
-			fmt.Println("\n Stopped by user")
+			config.output.report("Stopped by user")
 			break MAIN_LOOP
 		case response = <-channels.write.responses:
 			operators.writeAdjuster.adjust(response)
@@ -301,23 +313,21 @@ MAIN_LOOP:
 			time.Sleep(config.syncSleep)
 		}
 		if progress.reads.done+progress.writes.done > config.maxRequests {
-			stopPrinter <- true
-			fmt.Println("Exceeded maximum requests count")
+			results.report("Maximum requests count")
 			break
 		}
 		// TODO: Smarter aborter
 		if config.mode == ConstantRatio {
 			if progress.writes.inFlight+progress.reads.inFlight > (config.wps+config.rps)*2 {
-				stopPrinter <- true
-				fmt.Println("\n Could not sustain given rate")
+				results.error("Could not sustain given rate")
 				os.Exit(2)
 			}
 		}
 	}
 
-	println()
-	printResults(&progress.reads, startTime)
-	printResults(&progress.writes, startTime)
+	fillResults(&results.Writes, &progress.writes, results.StartTime)
+	fillResults(&results.Reads, &progress.reads, results.StartTime)
+	config.output.printResults(&results)
 }
 
 func validateParams() {
@@ -352,6 +362,18 @@ func configureMode() {
 	}
 }
 
+func selectPrinter() {
+	switch config.outputFormat {
+	case FormatHuman:
+		config.output = newHumanOutput()
+	case FormatJson:
+		config.output = &JsonOutput{}
+	default:
+		fmt.Println("Unknown output format")
+		os.Exit(2)
+	}
+}
+
 func configure() {
 	flag.IntVar(&config.rps, "rps", NotSet, "Reads per second")
 	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
@@ -366,9 +388,11 @@ func configure() {
 		"Max latency to allow when searching for maximum thread count")
 	// flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
 	flag.StringVar(&config.url, "url", "", "Url to submit requests")
+	flag.StringVar(&config.outputFormat, "output", FormatHuman, "Output format(human/json), defaults to human")
 	flag.Parse()
 	validateParams()
 	selectMode()
+	selectPrinter()
 	configureMode()
 
 }

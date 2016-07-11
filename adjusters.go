@@ -58,7 +58,7 @@ func (a *latencyAdjuster) adjust(response *Response) {
 				p(a.state.colored(arrowDown))
 				a.state.speed--
 			}
-		} else if a.movingTime <= config.badResponseTime/100*(100-thresholdPercent){
+		} else if a.movingTime <= config.badResponseTime/100*(100-thresholdPercent) {
 			if a.state.speed < config.maxChannels {
 				p(a.state.colored(arrowUp))
 				a.state.speed++

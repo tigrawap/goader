@@ -20,3 +20,11 @@ type Requester interface {
 type Target interface {
 	get() int64
 }
+
+//Output presents result in human or variable machine readable forms
+type Output interface {
+	progress(s string)
+	error(s string)
+	report(s string)
+	printResults(result *Results)
+}
