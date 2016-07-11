@@ -29,7 +29,8 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 - `upload` Uploads (by PUT) and GET files (done, default engine).  
 - `http` Planned. Simple single variable method http tester. Planned to support url template or weighted urls files list   
 - `s3` planned, to test self hosted object storage with s3 interface  
-- `disk` planned, should support variable block size and O_DIRECT mode
+- `disk` planned, should support variable block size and O_DIRECT mode  
+
 ##### Output formatters
 `--output=`  
 - `human` Default, human readable output, also displays real time progress  
