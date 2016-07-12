@@ -8,19 +8,21 @@ import (
 	"regexp"
 	"time"
 
+	"io/ioutil"
+
 	"github.com/valyala/fasthttp"
 )
 
 type nullRequester struct {
 }
 
-func (n *nullRequester) request(channels *OPChannels, request *Request) {
-	channels.responses <- &Response{request, time.Nanosecond, nil}
-}
-
 type sleepRequster struct {
 	state *OPState
 	db    chan int
+}
+
+func (n *nullRequester) request(channels *OPChannels, request *Request) {
+	channels.responses <- &Response{request, time.Nanosecond, nil}
 }
 
 func (requester *sleepRequster) request(channels *OPChannels, request *Request) {
@@ -47,24 +49,37 @@ func newSleepRequster(state *OPState) *sleepRequster {
 }
 
 type httpRequester struct {
-	data             []byte
-	client           fasthttp.Client
-	method           string
-	pattern          *regexp.Regexp
-	patternFormatter string
-	state            *OPState
+	data      []byte
+	client    fasthttp.Client
+	method    string
+	formatter *templateFormatter
+	state     *OPState
+}
+
+type templateFormatter struct {
+	base      string
+	regex     *regexp.Regexp
+	intFormat string
+}
+
+func newTemplateFormatter(url string) *templateFormatter {
+	if url == "" {
+		panic("Must specify url for requests")
+	}
+	formatter := templateFormatter{
+		base:  url,
+		regex: regexp.MustCompile(`(X{2,})`),
+	}
+	length := len(formatter.regex.FindString(formatter.base))
+	formatter.intFormat = fmt.Sprintf("%%0%dd", length)
+	return &formatter
 }
 
 func newHTTPRequester(state *OPState) *httpRequester {
-	if config.url == "" {
-		panic("Must specify url for requests")
-	}
 	requester := httpRequester{
-		state: state,
+		state:     state,
+		formatter: newTemplateFormatter(config.url),
 	}
-	requester.pattern = regexp.MustCompile(`(X{2,})`)
-	length := len(requester.pattern.FindString(config.url))
-	requester.patternFormatter = fmt.Sprintf("%%0%dd", length)
 	requester.state = state
 	if state.op == WRITE {
 		requester.method = "PUT"
@@ -78,8 +93,8 @@ func newHTTPRequester(state *OPState) *httpRequester {
 
 func (requester *httpRequester) request(channels *OPChannels, request *Request) {
 	req := fasthttp.AcquireRequest()
-	req.SetRequestURI(requester.pattern.ReplaceAllString(config.url,
-		fmt.Sprintf(requester.patternFormatter,
+	req.SetRequestURI(requester.formatter.regex.ReplaceAllString(config.url,
+		fmt.Sprintf(requester.formatter.intFormat,
 			request.num)))
 
 	req.Header.SetMethodBytes([]byte(requester.method))
@@ -108,6 +123,37 @@ func (requester *httpRequester) request(channels *OPChannels, request *Request) 
 		channels.responses <- &Response{request, timeSpent, nil}
 	default:
 		p(requester.state.colored("E"))
-		channels.responses <- &Response{request, timeSpent, fmt.Errorf("Error: statusCode")}
+		channels.responses <- &Response{request, timeSpent, fmt.Errorf("Error: %v ", resp.StatusCode())}
 	}
+}
+
+type diskRequester struct {
+	state     *OPState
+	formatter *templateFormatter
+	data      []byte
+}
+
+func newDiskRequester(state *OPState) *diskRequester {
+	r := diskRequester{
+		state:     state,
+		formatter: newTemplateFormatter(config.url),
+	}
+	if state.op == WRITE {
+		r.data = make([]byte, config.bodySize)
+	}
+	return &r
+}
+
+func (requester *diskRequester) request(channels *OPChannels, request *Request) {
+	filename := requester.formatter.regex.ReplaceAllString(config.url,
+		fmt.Sprintf(requester.formatter.intFormat,
+			request.num))
+	var err error
+	start := time.Now()
+	if requester.state.op == WRITE {
+		err = ioutil.WriteFile(filename, requester.data, 0644)
+	} else {
+		_, err = ioutil.ReadFile(filename)
+	}
+	channels.responses <- &Response{request, time.Since(start), err}
 }

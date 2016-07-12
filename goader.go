@@ -35,6 +35,7 @@ const (
 	ConstantThreads = "constant-threads"
 	Sleep           = "sleep"
 	Upload          = "upload"
+	Disk            = "disk"
 	Null            = "null"
 	NotSet          = -1
 	FormatHuman     = "human"
@@ -221,6 +222,9 @@ func getOperators(progress *Progress) *Operators {
 	case Upload:
 		operators.writeRequster = newHTTPRequester(&progress.writes)
 		operators.readRequester = newHTTPRequester(&progress.reads)
+	case Disk:
+		operators.writeRequster = newDiskRequester(&progress.writes)
+		operators.readRequester = newDiskRequester(&progress.reads)
 	case Null:
 		operators.writeRequster = &nullRequester{}
 		operators.readRequester = &nullRequester{}

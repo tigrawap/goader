@@ -3,9 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mgutz/ansi"
 	"sort"
 	"strconv"
-	"github.com/mgutz/ansi"
 )
 
 type HumanOutput struct {
@@ -16,7 +16,7 @@ type JsonOutput struct{}
 
 func newHumanOutput() *HumanOutput {
 	o := HumanOutput{
-		pb: make(chan string, 1000),
+		pb:   make(chan string, 1000),
 		quit: make(chan bool),
 	}
 	go o.printer()
@@ -27,10 +27,10 @@ func newHumanOutput() *HumanOutput {
 func (o *HumanOutput) printer() {
 	for {
 		select {
-		case <-	o.quit:
+		case <-o.quit:
 			println()
-			for{
-				<- o.quit
+			for {
+				<-o.quit
 			}
 		case s := <-o.pb:
 			print(s)
