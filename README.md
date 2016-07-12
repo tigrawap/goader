@@ -20,7 +20,7 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 ### Features
 - Extendable architecture with support of multiple request engines
 - Simple url template, http://localhost/post/XXXXX. XXXXX will be replaced by incremental integers, (number of Xs>2)
-- Supports different output formatters, atm human|readable
+- Supports different output formatters, atm human|json, default is human
 
 #####Request engines  
 `--requests-engine=`  
@@ -112,6 +112,11 @@ Average OP/s:  25068
 Average good OP/s:  25068
 ```
 
+
+###### Kudos  
+- FastHTTP https://github.com/valyala/fasthttp  
+- Ansi Colors http://github.com/mgutz/ans  
+- Go Humans https://github.com/dustin/go-humanize  
 
 
 
