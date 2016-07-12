@@ -135,6 +135,7 @@ func newDiskRequester(state *OPState) *diskRequester {
 	}
 	if state.op == WRITE {
 		r.data = make([]byte, config.bodySize)
+		randc.Read(r.data)
 	}
 	return &r
 }
