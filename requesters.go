@@ -21,23 +21,21 @@ type sleepRequster struct {
 	db    chan int
 }
 
-func (n *nullRequester) request(channels *OPChannels, request *Request) {
-	channels.responses <- &Response{request, time.Nanosecond, nil}
+func (n *nullRequester) request(responses chan *Response, request *Request) {
+	responses <- &Response{request, time.Nanosecond, nil}
 }
 
-func (requester *sleepRequster) request(channels *OPChannels, request *Request) {
+func (requester *sleepRequster) request(responses chan *Response, request *Request) {
 	if rand.Intn(10000)-requester.state.inFlight < 0 {
-		p(requester.state.colored("E"))
-		channels.responses <- &Response{request, 0, errors.New("Bad response")}
+		responses <- &Response{request, 0, errors.New("Bad response")}
 		return
 	}
-	p(requester.state.colored("."))
 	start := time.Now()
 	requester.db <- 0
 	var timeToSleep = time.Duration(rand.Intn(200)) * time.Millisecond
 	time.Sleep(timeToSleep)
 	<-requester.db
-	channels.responses <- &Response{request, time.Since(start), nil}
+	responses <- &Response{request, time.Since(start), nil}
 }
 
 func newSleepRequster(state *OPState) *sleepRequster {
@@ -91,7 +89,7 @@ func newHTTPRequester(state *OPState) *httpRequester {
 	return &requester
 }
 
-func (requester *httpRequester) request(channels *OPChannels, request *Request) {
+func (requester *httpRequester) request(responses chan *Response, request *Request) {
 	req := fasthttp.AcquireRequest()
 	req.SetRequestURI(requester.formatter.regex.ReplaceAllString(config.url,
 		fmt.Sprintf(requester.formatter.intFormat,
@@ -111,19 +109,16 @@ func (requester *httpRequester) request(channels *OPChannels, request *Request) 
 	fasthttp.ReleaseResponse(resp)
 
 	if err != nil {
-		p(requester.state.colored("E"))
-		channels.responses <- &Response{request, timeSpent,
+		responses <- &Response{request, timeSpent,
 			fmt.Errorf("Bad request: %v", err)}
 		return
 	}
 
 	switch statusCode {
 	case fasthttp.StatusOK, fasthttp.StatusCreated:
-		p(requester.state.colored("."))
-		channels.responses <- &Response{request, timeSpent, nil}
+		responses <- &Response{request, timeSpent, nil}
 	default:
-		p(requester.state.colored("E"))
-		channels.responses <- &Response{request, timeSpent, fmt.Errorf("Error: %v ", resp.StatusCode())}
+		responses <- &Response{request, timeSpent, fmt.Errorf("Error: %v ", resp.StatusCode())}
 	}
 }
 
@@ -144,7 +139,7 @@ func newDiskRequester(state *OPState) *diskRequester {
 	return &r
 }
 
-func (requester *diskRequester) request(channels *OPChannels, request *Request) {
+func (requester *diskRequester) request(responses chan *Response, request *Request) {
 	filename := requester.formatter.regex.ReplaceAllString(config.url,
 		fmt.Sprintf(requester.formatter.intFormat,
 			request.num))
@@ -155,5 +150,5 @@ func (requester *diskRequester) request(channels *OPChannels, request *Request) 
 	} else {
 		_, err = ioutil.ReadFile(filename)
 	}
-	channels.responses <- &Response{request, time.Since(start), err}
+	responses <- &Response{request, time.Since(start), err}
 }

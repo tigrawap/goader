@@ -6,9 +6,9 @@ import (
 
 type threadedEmitter struct{}
 
-func (emitter *threadedEmitter) emitRequests(channels *OPChannels, state *OPState) {
+func (emitter *threadedEmitter) emitRequests(state *OPState) {
 	for state.speed > state.inFlight {
-		channels.requests <- 1
+		state.requests <- 1
 		state.inFlight++
 	}
 }
@@ -32,7 +32,7 @@ type rateEmitter struct {
 	totalEmitted int64
 }
 
-func (emitter *rateEmitter) emitRequests(channels *OPChannels, state *OPState) {
+func (emitter *rateEmitter) emitRequests(state *OPState) {
 	if emitter.emitEvery == 0 {
 		return
 	}
@@ -44,6 +44,6 @@ func (emitter *rateEmitter) emitRequests(channels *OPChannels, state *OPState) {
 	for i = 0; i < notEmitted; i++ {
 		state.inFlight++
 		emitter.totalEmitted++
-		channels.requests <- 1
+		state.requests <- 1
 	}
 }

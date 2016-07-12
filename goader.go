@@ -56,6 +56,7 @@ var config struct {
 	engine          string
 	outputFormat    string
 	output          Output
+	showProgress    bool
 	syncSleep       time.Duration
 	badResponseTime time.Duration
 }
@@ -79,28 +80,17 @@ type Results struct {
 	StartTime time.Time
 }
 
-func startWorker(channels *Channels, operators *Operators) {
+func startWorker(progress *Progress, operators *Operators) {
 	for {
 		select {
-		case <-channels.read.requests:
-			operators.readRequester.request(&channels.read, &Request{operators.readTarget.get()})
-		case <-channels.write.requests:
-			operators.writeRequster.request(&channels.write, &Request{operators.writeTarget.get()})
+		case <-progress.reads.requests:
+			operators.readRequester.request(progress.reads.responses, &Request{operators.readTarget.get()})
+		case <-progress.writes.requests:
+			operators.writeRequster.request(progress.writes.responses, &Request{operators.writeTarget.get()})
 		}
 	}
 }
 
-//OPChannels hold channels for communication for specific operation
-type OPChannels struct {
-	responses chan *Response
-	requests  chan int
-}
-
-//Channels for communication per op
-type Channels struct {
-	read  OPChannels
-	write OPChannels
-}
 type op int
 
 const (
@@ -119,6 +109,9 @@ type OPState struct {
 	latencies timeArray
 	totalTime time.Duration
 	colored   func(string) string
+	responses chan *Response
+	requests  chan int
+	progress  chan bool
 }
 
 // Progress of benchmark
@@ -130,6 +123,9 @@ type Progress struct {
 func processResponse(response *Response, state *OPState) {
 	state.inFlight--
 	state.done++
+	if config.showProgress{
+		state.progress <- response.err == nil
+	}
 	if response.err == nil {
 		state.totalTime += response.latency
 		state.goodNums = append(state.goodNums, response.request.num)
@@ -217,15 +213,19 @@ func getOperators(progress *Progress) *Operators {
 	}
 	switch config.engine {
 	case Sleep:
+		config.showProgress = true
 		operators.writeRequster = newSleepRequster(&progress.writes)
 		operators.readRequester = newSleepRequster(&progress.reads)
 	case Upload:
+		config.showProgress = true
 		operators.writeRequster = newHTTPRequester(&progress.writes)
 		operators.readRequester = newHTTPRequester(&progress.reads)
 	case Disk:
+		config.showProgress = false
 		operators.writeRequster = newDiskRequester(&progress.writes)
 		operators.readRequester = newDiskRequester(&progress.reads)
 	case Null:
+		config.showProgress = false
 		operators.writeRequster = &nullRequester{}
 		operators.readRequester = &nullRequester{}
 	default:
@@ -269,26 +269,35 @@ func (r *Results) report(s string) {
 	config.output.report(s)
 }
 
+func displayProgress(state *OPState) {
+	for {
+		success := <-state.progress
+		if success {
+			p(state.colored("."))
+		} else {
+			p(state.colored("E"))
+		}
+	}
+}
+
 func makeLoad() {
 	quit := quitOnInterrupt()
-	channels := Channels{
-		read: OPChannels{
-			responses: make(chan *Response, 100),
-			requests:  make(chan int, config.maxChannels*2)},
-		write: OPChannels{
-			responses: make(chan *Response, 100),
-			requests:  make(chan int, config.maxChannels*2)},
-	}
 	progress := Progress{
 		writes: OPState{
-			op:       WRITE,
-			goodNums: make([]int64, 0, config.maxRequests),
-			colored:  ansi.ColorFunc("blue+h:black"),
+			op:        WRITE,
+			goodNums:  make([]int64, 0, config.maxRequests),
+			colored:   ansi.ColorFunc("blue+h:black"),
+			responses: make(chan *Response, 100),
+			requests:  make(chan int, config.maxChannels*2),
+			progress:  make(chan bool, config.maxChannels*2),
 		},
 		reads: OPState{
-			op:       READ,
-			goodNums: make([]int64, 0, config.maxRequests),
-			colored:  ansi.ColorFunc("green+h:black"),
+			op:        READ,
+			goodNums:  make([]int64, 0, config.maxRequests),
+			colored:   ansi.ColorFunc("green+h:black"),
+			responses: make(chan *Response, 100),
+			requests:  make(chan int, config.maxChannels*2),
+			progress:  make(chan bool, config.maxChannels*2),
 		},
 	}
 	progress.reads.speed = config.readThreads
@@ -296,24 +305,26 @@ func makeLoad() {
 	operators := getOperators(&progress)
 
 	for i := 0; i < config.maxChannels*2; i++ {
-		go startWorker(&channels, operators)
+		go startWorker(&progress, operators)
 	}
+	go displayProgress(&progress.writes)
+	go displayProgress(&progress.reads)
 	results := Results{
 		StartTime: time.Now(),
 	}
 MAIN_LOOP:
 	for {
-		operators.writeEmitter.emitRequests(&channels.write, &progress.writes)
-		operators.readEmitter.emitRequests(&channels.read, &progress.reads)
+		operators.writeEmitter.emitRequests(&progress.writes)
+		operators.readEmitter.emitRequests(&progress.reads)
 		var response *Response
 		select {
 		case <-quit:
 			config.output.report("Stopped by user")
 			break MAIN_LOOP
-		case response = <-channels.write.responses:
+		case response = <-progress.writes.responses:
 			operators.writeAdjuster.adjust(response)
 			processResponse(response, &progress.writes)
-		case response = <-channels.read.responses:
+		case response = <-progress.reads.responses:
 			operators.readAdjuster.adjust(response)
 			processResponse(response, &progress.reads)
 		default:
