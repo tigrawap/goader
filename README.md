@@ -48,6 +48,7 @@ Defaults to 160KiB, supports human formats, 1KiB for 1024 bytes, 1k/1kb for 1000
 Combination of `--max-latency` and `-wt/-rt` will set initial threads count, useful if you know where to start, starting from 1 can take time to heat up  
 - `-rpw`  Reads per writes in search for max throughput mode   
 - `-url` Defines url/file path template. XXXXX in path will be replaced by incremental integers. If no pattern specified same path will be used for all requests   
+- `--max-channels` Sets maximum channel count, defaults to 500. May be useful if you got reasons to raise top threads count over 500    
 
 
    
