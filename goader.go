@@ -13,6 +13,8 @@ import (
 
 	"runtime"
 
+	"bytes"
+
 	"github.com/mgutz/ansi"
 )
 
@@ -43,22 +45,21 @@ const (
 )
 
 var config struct {
-	url             string //url/pattern
-	rps             int
-	wps             int
-	rpw             int
-	writeThreads    int
-	readThreads     int
-	maxChannels     int
-	maxRequests     int64
-	bodySize        int
-	mode            string
-	engine          string
-	outputFormat    string
-	output          Output
-	showProgress    bool
-	syncSleep       time.Duration
-	badResponseTime time.Duration
+	url          string //url/pattern
+	rps          int
+	wps          int
+	rpw          int
+	writeThreads int
+	readThreads  int
+	maxChannels  int
+	maxRequests  int64
+	bodySize     int
+	mode         string
+	engine       string
+	outputFormat string
+	output       Output
+	syncSleep    time.Duration
+	maxLatency   time.Duration
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -123,9 +124,7 @@ type Progress struct {
 func processResponse(response *Response, state *OPState) {
 	state.inFlight--
 	state.done++
-	if config.showProgress{
-		state.progress <- response.err == nil
-	}
+	state.progress <- response.err == nil
 	if response.err == nil {
 		state.totalTime += response.latency
 		state.goodNums = append(state.goodNums, response.request.num)
@@ -213,19 +212,15 @@ func getOperators(progress *Progress) *Operators {
 	}
 	switch config.engine {
 	case Sleep:
-		config.showProgress = true
 		operators.writeRequster = newSleepRequster(&progress.writes)
 		operators.readRequester = newSleepRequster(&progress.reads)
 	case Upload:
-		config.showProgress = true
 		operators.writeRequster = newHTTPRequester(&progress.writes)
 		operators.readRequester = newHTTPRequester(&progress.reads)
 	case Disk:
-		config.showProgress = false
 		operators.writeRequster = newDiskRequester(&progress.writes)
 		operators.readRequester = newDiskRequester(&progress.reads)
 	case Null:
-		config.showProgress = false
 		operators.writeRequster = &nullRequester{}
 		operators.readRequester = &nullRequester{}
 	default:
@@ -270,12 +265,25 @@ func (r *Results) report(s string) {
 }
 
 func displayProgress(state *OPState) {
+	rate := time.Second / 1000
+	throttle := time.Tick(rate)
+	output := make(map[bool]string)
+	output[true] = state.colored(".")
+	output[false] = state.colored("E")
+	var buffer bytes.Buffer
+
 	for {
 		success := <-state.progress
-		if success {
-			p(state.colored("."))
-		} else {
-			p(state.colored("E"))
+		if config.engine == Null {
+			continue
+		}
+		buffer.WriteString(output[success])
+		select {
+		case <-throttle:
+			p(buffer.String())
+			buffer.Truncate(0)
+		default:
+			continue
 		}
 	}
 }
@@ -312,37 +320,43 @@ func makeLoad() {
 	results := Results{
 		StartTime: time.Now(),
 	}
-MAIN_LOOP:
-	for {
-		operators.writeEmitter.emitRequests(&progress.writes)
-		operators.readEmitter.emitRequests(&progress.reads)
-		var response *Response
-		select {
-		case <-quit:
-			config.output.report("Stopped by user")
-			break MAIN_LOOP
-		case response = <-progress.writes.responses:
-			operators.writeAdjuster.adjust(response)
-			processResponse(response, &progress.writes)
-		case response = <-progress.reads.responses:
-			operators.readAdjuster.adjust(response)
-			processResponse(response, &progress.reads)
-		default:
-			time.Sleep(config.syncSleep)
-		}
-		if progress.reads.done+progress.writes.done > config.maxRequests {
-			results.report("Maximum requests count")
-			break
-		}
-		// TODO: Smarter aborter
-		if config.mode == ConstantRatio {
-			if progress.writes.inFlight+progress.reads.inFlight > (config.wps+config.rps)*2 {
-				results.error("Could not sustain given rate")
-				os.Exit(2)
+	mainDone := make(chan bool)
+	go func() {
+	MAIN_LOOP:
+
+		for {
+			operators.writeEmitter.emitRequests(&progress.writes)
+			operators.readEmitter.emitRequests(&progress.reads)
+			var response *Response
+			select {
+			case <-quit:
+				config.output.report("Stopped by user")
+				break MAIN_LOOP
+			case response = <-progress.writes.responses:
+				operators.writeAdjuster.adjust(response)
+				processResponse(response, &progress.writes)
+			case response = <-progress.reads.responses:
+				operators.readAdjuster.adjust(response)
+				processResponse(response, &progress.reads)
+			default:
+				time.Sleep(config.syncSleep)
+			}
+			if progress.reads.done+progress.writes.done > config.maxRequests {
+				results.report("Maximum requests count")
+				break
+			}
+			// TODO: Smarter aborter
+			if config.mode == ConstantRatio {
+				if progress.writes.inFlight+progress.reads.inFlight > (config.wps+config.rps)*2 {
+					results.error("Could not sustain given rate")
+					os.Exit(2)
+				}
 			}
 		}
-	}
+		mainDone <- true
+	}()
 
+	<-mainDone
 	fillResults(&results.Writes, &progress.writes, results.StartTime)
 	fillResults(&results.Reads, &progress.reads, results.StartTime)
 	config.output.printResults(&results)
@@ -355,12 +369,15 @@ func validateParams() {
 }
 
 func selectMode() {
-	if config.writeThreads > 0 || config.readThreads > 0 {
+	if config.maxLatency != NotSet {
+		config.mode = LowLatency
+	} else if config.writeThreads > 0 || config.readThreads > 0 {
 		config.mode = ConstantThreads
 	} else if config.wps > 0 || config.rps > 0 {
 		config.mode = ConstantRatio
 	} else {
-		config.mode = LowLatency
+		fmt.Println("Should specify one of rps/wps/rt/wt/max-latency")
+		os.Exit(2)
 	}
 }
 
@@ -402,7 +419,7 @@ func configure() {
 	flag.IntVar(&config.maxChannels, "max-channels", 500, "Maximum threads")
 	flag.IntVar(&config.bodySize, "body-size", 1024*160, "Body size for put requests, in bytes")
 	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload")
-	flag.DurationVar(&config.badResponseTime, "max-latency", time.Duration(1000*time.Millisecond),
+	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
 		"Max latency to allow when searching for maximum thread count")
 	// flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
 	flag.StringVar(&config.url, "url", "", "Url to submit requests")
@@ -418,8 +435,8 @@ func configure() {
 func main() {
 	configure()
 	maxprocs := runtime.GOMAXPROCS(0)
-	if maxprocs < 4 {
-		runtime.GOMAXPROCS(4)
+	if maxprocs < 8 {
+		runtime.GOMAXPROCS(8)
 	}
 	makeLoad()
 }

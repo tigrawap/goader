@@ -28,12 +28,12 @@ func (o *HumanOutput) printer() {
 	for {
 		select {
 		case <-o.quit:
-			println()
+			fmt.Println()
 			for {
 				<-o.quit
 			}
 		case s := <-o.pb:
-			print(s)
+			fmt.Print(s)
 		}
 	}
 }
@@ -46,7 +46,7 @@ func (o *HumanOutput) printOpResult(r *OPResults, header string) {
 	if r.Done == 0 {
 		return
 	}
-	println("\n", ansi.Color(header, "blue+h"))
+	fmt.Println("\n", ansi.Color(header, "blue+h"))
 	if r.Done-r.Errors > 0 {
 		fmt.Println("Average response time:", r.AverageSpeed)
 		var keys []int
@@ -62,7 +62,7 @@ func (o *HumanOutput) printOpResult(r *OPResults, header string) {
 		}
 
 		if config.mode == LowLatency {
-			fmt.Printf("Threads with latency below %v: %v\n", config.badResponseTime, r.FinalSpeed)
+			fmt.Printf("Threads with latency below %v: %v\n", config.maxLatency, r.FinalSpeed)
 		}
 	}
 
@@ -83,9 +83,9 @@ func (o *JsonOutput) progress(s string) {
 func (o *JsonOutput) printResults(r *Results) {
 	b, err := json.Marshal(r)
 	if err == nil {
-		println(string(b))
+		fmt.Println(string(b))
 	} else {
-		println(err.Error())
+		fmt.Println(err.Error())
 	}
 }
 
@@ -101,7 +101,7 @@ func (o *HumanOutput) error(s string) {
 
 func (o *HumanOutput) report(s string) {
 	o.stopStream()
-	println(s)
+	fmt.Println(s)
 }
 
 func (o *JsonOutput) report(s string) {

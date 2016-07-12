@@ -47,18 +47,18 @@ func (a *latencyAdjuster) adjust(response *Response) {
 	a.movingCount++
 	sample := int(math.Log(float64(a.state.speed)) * logbase)
 	if response.err != nil {
-		a.avgTime += config.badResponseTime * time.Duration(sample)
+		a.avgTime += config.maxLatency * time.Duration(sample)
 	} else {
 		a.avgTime += response.latency
 	}
 	if a.movingCount >= sample {
 		a.movingTime = a.avgTime / time.Duration(a.movingCount)
-		if a.movingTime >= config.badResponseTime/100*(100+thresholdPercent) {
+		if a.movingTime >= config.maxLatency/100*(100+thresholdPercent) {
 			if a.state.speed > 1 {
 				p(a.state.colored(arrowDown))
 				a.state.speed--
 			}
-		} else if a.movingTime <= config.badResponseTime/100*(100-thresholdPercent) {
+		} else if a.movingTime <= config.maxLatency/100*(100-thresholdPercent) {
 			if a.state.speed < config.maxChannels {
 				p(a.state.colored(arrowUp))
 				a.state.speed++
