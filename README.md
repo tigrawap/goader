@@ -115,7 +115,7 @@ Average good OP/s:  25068
 
 ###### Kudos  
 - FastHTTP https://github.com/valyala/fasthttp  
-- Ansi Colors http://github.com/mgutz/ans  
+- Ansi Colors http://github.com/mgutz/ansi
 - Go Humans https://github.com/dustin/go-humanize  
 
 
