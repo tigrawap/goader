@@ -9,8 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mgutz/ansi"
 	"strconv"
+
+	"runtime"
+
+	"github.com/mgutz/ansi"
 )
 
 //Request struct
@@ -399,5 +402,9 @@ func configure() {
 
 func main() {
 	configure()
+	maxprocs := runtime.GOMAXPROCS(0)
+	if maxprocs < 4 {
+		runtime.GOMAXPROCS(4)
+	}
 	makeLoad()
 }
