@@ -15,6 +15,7 @@ import (
 
 	"bytes"
 
+	"github.com/dustin/go-humanize"
 	"github.com/mgutz/ansi"
 )
 
@@ -45,21 +46,22 @@ const (
 )
 
 var config struct {
-	url          string //url/pattern
-	rps          int
-	wps          int
-	rpw          int
-	writeThreads int
-	readThreads  int
-	maxChannels  int
-	maxRequests  int64
-	bodySize     int
-	mode         string
-	engine       string
-	outputFormat string
-	output       Output
-	syncSleep    time.Duration
-	maxLatency   time.Duration
+	url           string //url/pattern
+	rps           int
+	wps           int
+	rpw           int
+	writeThreads  int
+	readThreads   int
+	maxChannels   int
+	maxRequests   int64
+	bodySize      uint64
+	bodySizeInput string
+	mode          string
+	engine        string
+	outputFormat  string
+	output        Output
+	syncSleep     time.Duration
+	maxLatency    time.Duration
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -417,7 +419,7 @@ func configure() {
 	flag.IntVar(&config.rpw, "rpw", 1, "Reads per write in search-for maximum mode")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
 	flag.IntVar(&config.maxChannels, "max-channels", 500, "Maximum threads")
-	flag.IntVar(&config.bodySize, "body-size", 1024*160, "Body size for put requests, in bytes")
+	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes")
 	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload")
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
 		"Max latency to allow when searching for maximum thread count")
@@ -425,6 +427,11 @@ func configure() {
 	flag.StringVar(&config.url, "url", "", "Url to submit requests")
 	flag.StringVar(&config.outputFormat, "output", FormatHuman, "Output format(human/json), defaults to human")
 	flag.Parse()
+	var err error
+	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 	validateParams()
 	selectMode()
 	selectPrinter()
