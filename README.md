@@ -25,11 +25,15 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 #####Request engines  
 `--requests-engine=`  
 - `null` Does nothing, useful for testing utility itself. At the moment reaches 700k requests per/sec  
-- `sleep` Requster. For testing, sleeps instead of making real requests, also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life 
+- `sleep` Requster. For testing, sleeps instead of making real requests,
+ also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life 
 - `upload` Uploads (by PUT) and GET files (done, default engine).  
 - `disk` Writes/Reads to/from disk. Support for O_DIRECT is planned  
+- `s3` Supported only signature version v2, v4 is planned. See `--help` for s3 params(bucket,keys,endpoint). 
+`-url` stands for object key(with usual templating support)
+must provide endpoint, see list here: http://docs.aws.amazon.com/general/latest/gr/rande.html
+or use endpoint of your custom object storage with s3 interface  
 - `http` Planned. Simple single variable method http tester. Planned to support url template or weighted urls files list   
-- `s3` planned, to test self hosted object storage with s3 interface  
 
 ##### Output formatters
 `--output=`  
@@ -38,17 +42,19 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 
 ##### Other options  
 - `-max-requests` Sets maximum requests count, defaults to 10000. (CTRL+C will abort and show stats)  
-- `--body-size` Sets size for file sizes/post body sizes. 
+- `-body-size` Sets size for file sizes/post body sizes. 
 Defaults to 160KiB, supports human formats, 1KiB for 1024 bytes, 1k/1kb for 1000 bytes  
 - `-rps` Sets reads per seconds  
 - `-wps` Sets writes per seconds  
 - `-wt`  Sets concurrent write threads  
 - `-rt`  Sets concurrent read threads  
 - `-max-latency` Searches for maximum threads count with defined maximum latency, supports human format (1s, 300ms)
-Combination of `--max-latency` and `-wt/-rt` will set initial threads count, useful if you know where to start, starting from 1 can take time to heat up  
+Combination of `-max-latency` and `-wt/-rt` will set initial threads count, useful if you know where to start, starting from 1 can take time to heat up  
 - `-rpw`  Reads per writes in search for max throughput mode   
 - `-url` Defines url/file path template. XXXXX in path will be replaced by incremental integers. If no pattern specified same path will be used for all requests   
-- `--max-channels` Sets maximum channel count, defaults to 500. May be useful if you got reasons to raise top threads count over 500    
+- `-max-channels` Sets maximum channel count, defaults to 500. May be useful if you got reasons to raise top threads count over 500    
+- `-stop-on-bad-rate` Stops execution if cannot maintain given rps/wps. Defaults to false  
+- `-show-progress` Displays progress of test execution. Defaults to true  
 
 
    
