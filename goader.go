@@ -38,11 +38,13 @@ const (
 	ConstantThreads = "constant-threads"
 	Sleep           = "sleep"
 	Upload          = "upload"
+	S3              = "s3"
 	Disk            = "disk"
 	Null            = "null"
 	NotSet          = -1
+	NotSetString    = ""
 	FormatHuman     = "human"
-	FormatJson      = "json"
+	FormatJSON      = "json"
 )
 
 var config struct {
@@ -59,9 +61,15 @@ var config struct {
 	mode          string
 	engine        string
 	outputFormat  string
+	showProgress  bool
+	stopOnBadRate bool
 	output        Output
 	syncSleep     time.Duration
 	maxLatency    time.Duration
+	S3ApiKey      string
+	S3Bucket      string
+	S3Endpoint    string
+	S3SecretKey   string
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -75,6 +83,7 @@ type OPResults struct {
 	Percentiles    map[string]time.Duration
 }
 
+//Results of benchmark execution, represents final output, marshalled directly into json in json output mode
 type Results struct {
 	Writes    OPResults
 	Reads     OPResults
@@ -96,6 +105,7 @@ func startWorker(progress *Progress, operators *Operators) {
 
 type op int
 
+//Operation type
 const (
 	READ op = iota
 	WRITE
@@ -217,8 +227,17 @@ func getOperators(progress *Progress) *Operators {
 		operators.writeRequster = newSleepRequster(&progress.writes)
 		operators.readRequester = newSleepRequster(&progress.reads)
 	case Upload:
-		operators.writeRequster = newHTTPRequester(&progress.writes)
-		operators.readRequester = newHTTPRequester(&progress.reads)
+		operators.writeRequster = newHTTPRequester(&progress.writes, &nullAuther{})
+		operators.readRequester = newHTTPRequester(&progress.reads, &nullAuther{})
+	case S3:
+		s3Auther := s3Auther{
+			secretKey: config.S3SecretKey,
+			apiKey:    config.S3ApiKey,
+			bucket:    config.S3Bucket,
+			endpoint:  config.S3Endpoint,
+		}
+		operators.writeRequster = newHTTPRequester(&progress.writes, &s3Auther)
+		operators.readRequester = newHTTPRequester(&progress.reads, &s3Auther)
 	case Disk:
 		operators.writeRequster = newDiskRequester(&progress.writes)
 		operators.readRequester = newDiskRequester(&progress.reads)
@@ -276,7 +295,7 @@ func displayProgress(state *OPState) {
 
 	for {
 		success := <-state.progress
-		if config.engine == Null {
+		if config.engine == Null || !config.showProgress {
 			continue
 		}
 		buffer.WriteString(output[success])
@@ -348,7 +367,7 @@ func makeLoad() {
 				break
 			}
 			// TODO: Smarter aborter
-			if config.mode == ConstantRatio {
+			if config.mode == ConstantRatio && config.stopOnBadRate {
 				if progress.writes.inFlight+progress.reads.inFlight > (config.wps+config.rps)*2 {
 					results.error("Could not sustain given rate")
 					os.Exit(2)
@@ -403,8 +422,8 @@ func selectPrinter() {
 	switch config.outputFormat {
 	case FormatHuman:
 		config.output = newHumanOutput()
-	case FormatJson:
-		config.output = &JsonOutput{}
+	case FormatJSON:
+		config.output = &JSONOutput{}
 	default:
 		fmt.Println("Unknown output format")
 		os.Exit(2)
@@ -424,8 +443,14 @@ func configure() {
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
 		"Max latency to allow when searching for maximum thread count")
 	// flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
-	flag.StringVar(&config.url, "url", "", "Url to submit requests")
+	flag.StringVar(&config.url, "url", NotSetString, "Url to submit requests")
+	flag.StringVar(&config.S3ApiKey, "s3-api-key", NotSetString, "S3 api key")
+	flag.StringVar(&config.S3SecretKey, "s3-secret-key", NotSetString, "S3 secret key")
+	flag.StringVar(&config.S3Bucket, "s3-bucket", NotSetString, "S3 bucket")
+	flag.StringVar(&config.S3Endpoint, "s3-endpoint", NotSetString, "S3 endpoint")
 	flag.StringVar(&config.outputFormat, "output", FormatHuman, "Output format(human/json), defaults to human")
+	flag.BoolVar(&config.showProgress, "show-progress", true, "Displays progess as dots")
+	flag.BoolVar(&config.stopOnBadRate, "stop-on-bad-rate", false, "Stops benchmark if cant maintain rate")
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)

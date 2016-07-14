@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-//Incremental target increases number from one, one by one
+//IncrementalTarget increases number of request one by one
 type IncrementalTarget struct {
 	num     int64
 	targets chan int64
@@ -28,6 +28,7 @@ func (i *IncrementalTarget) get() int64 {
 	return <-i.targets
 }
 
+// BoundTarget will set number of requests randomaly selected from bound slice
 type BoundTarget struct {
 	bound *[]int64
 }

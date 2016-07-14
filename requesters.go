@@ -50,7 +50,8 @@ type httpRequester struct {
 	data      []byte
 	client    fasthttp.Client
 	method    string
-	formatter *templateFormatter
+	formatter URLFormatter
+	auther    HTTPAuther
 	state     *OPState
 }
 
@@ -58,6 +59,10 @@ type templateFormatter struct {
 	base      string
 	regex     *regexp.Regexp
 	intFormat string
+}
+
+func (f *templateFormatter) format(url string, requestNum int64) string {
+	return f.regex.ReplaceAllString(url, fmt.Sprintf(f.intFormat, requestNum))
 }
 
 func newTemplateFormatter(url string) *templateFormatter {
@@ -73,10 +78,11 @@ func newTemplateFormatter(url string) *templateFormatter {
 	return &formatter
 }
 
-func newHTTPRequester(state *OPState) *httpRequester {
+func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 	requester := httpRequester{
 		state:     state,
 		formatter: newTemplateFormatter(config.url),
+		auther:    auther,
 	}
 	requester.state = state
 	if state.op == WRITE {
@@ -91,22 +97,21 @@ func newHTTPRequester(state *OPState) *httpRequester {
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
 	req := fasthttp.AcquireRequest()
-	req.SetRequestURI(requester.formatter.regex.ReplaceAllString(config.url,
-		fmt.Sprintf(requester.formatter.intFormat,
-			request.num)))
+	defer fasthttp.ReleaseRequest(req)
+	req.SetRequestURI(requester.formatter.format(config.url, request.num))
 
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
 	if requester.data != nil {
 		req.SetBody(requester.data)
 	}
+	requester.auther.sign(req)
 	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
 	start := time.Now()
 	err := requester.client.Do(req, resp)
 	timeSpent := time.Since(start)
 	statusCode := resp.StatusCode()
-	fasthttp.ReleaseRequest(req)
-	fasthttp.ReleaseResponse(resp)
 
 	if err != nil {
 		responses <- &Response{request, timeSpent,
@@ -124,7 +129,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 type diskRequester struct {
 	state     *OPState
-	formatter *templateFormatter
+	formatter URLFormatter
 	data      []byte
 }
 
@@ -141,9 +146,8 @@ func newDiskRequester(state *OPState) *diskRequester {
 }
 
 func (requester *diskRequester) request(responses chan *Response, request *Request) {
-	filename := requester.formatter.regex.ReplaceAllString(config.url,
-		fmt.Sprintf(requester.formatter.intFormat,
-			request.num))
+	filename := requester.formatter.format(config.url, request.num)
+
 	var err error
 	start := time.Now()
 	if requester.state.op == WRITE {

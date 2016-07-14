@@ -3,16 +3,20 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/mgutz/ansi"
 	"sort"
 	"strconv"
+
+	"github.com/mgutz/ansi"
 )
 
+//HumanOutput will represent results in human form
 type HumanOutput struct {
 	pb   chan string
 	quit chan bool
 }
-type JsonOutput struct{}
+
+//JSONOutput will represent results in json form
+type JSONOutput struct{}
 
 func newHumanOutput() *HumanOutput {
 	o := HumanOutput{
@@ -78,9 +82,9 @@ func (o *HumanOutput) printResults(r *Results) {
 	o.printOpResult(&r.Reads, "Reads")
 }
 
-func (o *JsonOutput) progress(s string) {
+func (o *JSONOutput) progress(s string) {
 }
-func (o *JsonOutput) printResults(r *Results) {
+func (o *JSONOutput) printResults(r *Results) {
 	b, err := json.Marshal(r)
 	if err == nil {
 		fmt.Println(string(b))
@@ -104,8 +108,8 @@ func (o *HumanOutput) report(s string) {
 	fmt.Println(s)
 }
 
-func (o *JsonOutput) report(s string) {
+func (o *JSONOutput) report(s string) {
 }
 
-func (o *JsonOutput) error(s string) {
+func (o *JSONOutput) error(s string) {
 }
