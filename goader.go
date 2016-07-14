@@ -449,7 +449,7 @@ func configure() {
 	flag.StringVar(&config.S3Bucket, "s3-bucket", NotSetString, "S3 bucket")
 	flag.StringVar(&config.S3Endpoint, "s3-endpoint", NotSetString, "S3 endpoint")
 	flag.StringVar(&config.outputFormat, "output", FormatHuman, "Output format(human/json), defaults to human")
-	flag.BoolVar(&config.showProgress, "show-progress", true, "Displays progess as dots")
+	flag.BoolVar(&config.showProgress, "show-progress", true, "Displays progress as dots")
 	flag.BoolVar(&config.stopOnBadRate, "stop-on-bad-rate", false, "Stops benchmark if cant maintain rate")
 	flag.Parse()
 	var err error
