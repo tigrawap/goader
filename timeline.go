@@ -77,16 +77,16 @@ func buildTimeline(states ...*OPState) {
 	for _, state := range states {
 		for _, times := range state.timeline {
 			width := float64(int64(times.Latency)) / float64(int64(maxDuration)) * 100
-			if width < 1{
+			if width < 1 {
 				width = 1
 			}
 			result := TimeLineResult{
-				Times:         times,
-				Opname:        state.name,
-				op:            state.op,
-				Color:         state.color,
-				Width:         width,
-				}
+				Times:  times,
+				Opname: state.name,
+				op:     state.op,
+				Color:  state.color,
+				Width:  width,
+			}
 			//fmt.Println(result)
 			r = append(r, result)
 		}

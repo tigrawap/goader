@@ -23,7 +23,7 @@ import (
 
 //Request struct
 type Request struct {
-	num       int64
+	url       string
 	startTime time.Time
 }
 
@@ -126,7 +126,7 @@ type OPState struct {
 	done             int64
 	errors           int64
 	inFlight         int
-	goodNums         []int64
+	goodUrls         []string
 	op               op
 	name             string
 	latencies        timeArray
@@ -151,7 +151,7 @@ func newOPState(op op, color string) *OPState {
 		op:             op,
 		name:           name,
 		color:          color,
-		goodNums:       make([]int64, 0, config.maxRequests),
+		goodUrls:       make([]string, 0, config.maxRequests),
 		colored:        ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
 		responses:      make(chan *Response, config.maxChannels*2),
 		requests:       make(chan int, config.maxChannels*2),
@@ -197,7 +197,7 @@ func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit
 			state.progress <- response.err == nil
 			if response.err == nil {
 				state.totalTime += response.latency
-				state.goodNums = append(state.goodNums, response.request.num)
+				state.goodUrls = append(state.goodUrls, response.request.url)
 				state.latencies = append(state.latencies, response.latency)
 			} else {
 				state.errors++
@@ -205,7 +205,7 @@ func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit
 			state.timeline = append(state.timeline, RequestTimes{
 				Start:   response.request.startTime,
 				Latency: response.latency,
-				Success:   response.err == nil,
+				Success: response.err == nil,
 			})
 			adjuster.adjust(response)
 		}
@@ -228,7 +228,7 @@ func percentile(numbers timeArray, n int) time.Duration {
 
 func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 	results.Percentiles = make(map[string]time.Duration)
-	succesful := len(state.goodNums)
+	succesful := len(state.goodUrls)
 	if succesful > 0 {
 		results.AverageSpeed = state.totalTime / time.Duration(succesful)
 		sort.Sort(state.latencies)
@@ -319,13 +319,13 @@ func getOperators(progress *Progress) *Operators {
 	default:
 		panic("Unknown engine")
 	}
-	operators.writeTarget = newIncrementalTarget()
+	operators.writeTarget = newTemplatedTarget()
 	if config.wps > 0 || config.writeThreads > 0 {
 		operators.readTarget = &BoundTarget{
-			bound: &progress.writes.goodNums,
+			bound: &progress.writes.goodUrls,
 		}
 	} else {
-		operators.readTarget = newIncrementalTarget()
+		operators.readTarget = newTemplatedTarget()
 	}
 	return operators
 }

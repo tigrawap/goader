@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"regexp"
 	"time"
 
 	"io/ioutil"
@@ -47,42 +46,17 @@ func newSleepRequster(state *OPState) *sleepRequster {
 }
 
 type httpRequester struct {
-	data      []byte
-	client    fasthttp.Client
-	method    string
-	formatter URLFormatter
-	auther    HTTPAuther
-	state     *OPState
-}
-
-type templateFormatter struct {
-	base      string
-	regex     *regexp.Regexp
-	intFormat string
-}
-
-func (f *templateFormatter) format(url string, requestNum int64) string {
-	return f.regex.ReplaceAllString(url, fmt.Sprintf(f.intFormat, requestNum))
-}
-
-func newTemplateFormatter(url string) *templateFormatter {
-	if url == "" {
-		panic("Must specify url for requests")
-	}
-	formatter := templateFormatter{
-		base:  url,
-		regex: regexp.MustCompile(`(X{2,})`),
-	}
-	length := len(formatter.regex.FindString(formatter.base))
-	formatter.intFormat = fmt.Sprintf("%%0%dd", length)
-	return &formatter
+	data   []byte
+	client fasthttp.Client
+	method string
+	auther HTTPAuther
+	state  *OPState
 }
 
 func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 	requester := httpRequester{
-		state:     state,
-		formatter: newTemplateFormatter(config.url),
-		auther:    auther,
+		state:  state,
+		auther: auther,
 	}
 	requester.state = state
 	if state.op == WRITE {
@@ -98,7 +72,7 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
 	req := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(req)
-	req.SetRequestURI(requester.formatter.format(config.url, request.num))
+	req.SetRequestURI(request.url)
 
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
@@ -128,15 +102,13 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 }
 
 type diskRequester struct {
-	state     *OPState
-	formatter URLFormatter
-	data      []byte
+	state *OPState
+	data  []byte
 }
 
 func newDiskRequester(state *OPState) *diskRequester {
 	r := diskRequester{
-		state:     state,
-		formatter: newTemplateFormatter(config.url),
+		state: state,
 	}
 	if state.op == WRITE {
 		r.data = make([]byte, config.bodySize)
@@ -146,7 +118,7 @@ func newDiskRequester(state *OPState) *diskRequester {
 }
 
 func (requester *diskRequester) request(responses chan *Response, request *Request) {
-	filename := requester.formatter.format(config.url, request.num)
+	filename := request.url
 
 	var err error
 	start := time.Now()

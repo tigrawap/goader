@@ -10,7 +10,7 @@ type Emitter interface {
 
 //URLFormatter alters user supplied url string
 type URLFormatter interface {
-	format(url string, requestNum int64) string
+	format(requestNum int64) string
 }
 
 //HTTPAuther alters http requests with authentication headers
@@ -30,7 +30,7 @@ type Requester interface {
 
 //Target supplies requester with num of file/template
 type Target interface {
-	get() int64
+	get() string
 }
 
 //Output presents result in human or variable machine readable forms
