@@ -47,9 +47,9 @@ func newTemplateFormatter(url string) *templateFormatter {
 	}
 	length := len(formatter.incremental.FindString(formatter.base))
 	formatter.intFormat = fmt.Sprintf("%%0%dd", length)
-	formatter.incLength = len(formatter.random.FindString(formatter.base))
+	formatter.incLength = len(formatter.incremental.FindString(formatter.base))
 	formatter.randomLength = len(formatter.random.FindString(formatter.base))
-	formatter.randomNumLength = len(formatter.incremental.FindString(formatter.base))
+	formatter.randomNumLength = len(formatter.randomNum.FindString(formatter.base))
 	return &formatter
 }
 
