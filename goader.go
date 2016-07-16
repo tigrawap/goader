@@ -15,13 +15,16 @@ import (
 
 	"bytes"
 
+	"sync"
+
 	"github.com/dustin/go-humanize"
 	"github.com/mgutz/ansi"
 )
 
 //Request struct
 type Request struct {
-	num int64
+	num       int64
+	startTime time.Time
 }
 
 //Response struct
@@ -70,6 +73,7 @@ var config struct {
 	S3Bucket      string
 	S3Endpoint    string
 	S3SecretKey   string
+	timelineFile  string
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -80,7 +84,9 @@ type OPResults struct {
 	AverageGoodOps int64
 	FinalSpeed     int
 	AverageSpeed   time.Duration
+	TopTen         []time.Duration
 	Percentiles    map[string]time.Duration
+	StaggeredFor   time.Duration
 }
 
 //Results of benchmark execution, represents final output, marshalled directly into json in json output mode
@@ -92,13 +98,15 @@ type Results struct {
 	StartTime time.Time
 }
 
-func startWorker(progress *Progress, operators *Operators) {
+func startWorker(progress *Progress, operators *Operators, quit chan bool) {
 	for {
 		select {
+		case <-quit:
+			return
 		case <-progress.reads.requests:
-			operators.readRequester.request(progress.reads.responses, &Request{operators.readTarget.get()})
+			operators.readRequester.request(progress.reads.responses, &Request{operators.readTarget.get(), time.Now()})
 		case <-progress.writes.requests:
-			operators.writeRequster.request(progress.writes.responses, &Request{operators.writeTarget.get()})
+			operators.writeRequster.request(progress.writes.responses, &Request{operators.writeTarget.get(), time.Now()})
 		}
 	}
 }
@@ -113,36 +121,94 @@ const (
 
 //OPState contains state for OP(READ/WRITE)
 type OPState struct {
-	speed     int
-	done      int64
-	errors    int64
-	inFlight  int
-	goodNums  []int64
-	op        op
-	latencies timeArray
-	totalTime time.Duration
-	colored   func(string) string
-	responses chan *Response
-	requests  chan int
-	progress  chan bool
+	color            string
+	speed            int
+	done             int64
+	errors           int64
+	inFlight         int
+	goodNums         []int64
+	op               op
+	name             string
+	latencies        timeArray
+	totalTime        time.Duration
+	colored          func(string) string
+	responses        chan *Response
+	requests         chan int
+	progress         chan bool
+	inFlightUpdate   chan int
+	inFlightCallback chan int
+	timeline         TimeLine
+}
+
+func newOPState(op op, color string) *OPState {
+	var name string
+	if op == WRITE {
+		name = "write"
+	} else {
+		name = "read"
+	}
+	state := OPState{
+		op:             op,
+		name:           name,
+		color:          color,
+		goodNums:       make([]int64, 0, config.maxRequests),
+		colored:        ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
+		responses:      make(chan *Response, config.maxChannels*2),
+		requests:       make(chan int, config.maxChannels*2),
+		progress:       make(chan bool, config.maxChannels*2),
+		inFlightUpdate: make(chan int, config.maxChannels*2),
+	}
+	go state.inFlightUpdater()
+	return &state
 }
 
 // Progress of benchmark
 type Progress struct {
-	reads  OPState
-	writes OPState
+	reads  *OPState
+	writes *OPState
 }
 
-func processResponse(response *Response, state *OPState) {
-	state.inFlight--
-	state.done++
-	state.progress <- response.err == nil
-	if response.err == nil {
-		state.totalTime += response.latency
-		state.goodNums = append(state.goodNums, response.request.num)
-		state.latencies = append(state.latencies, response.latency)
-	} else {
-		state.errors++
+func (state *OPState) inFlightUpdater() {
+	var update int
+	for {
+		update = <-state.inFlightUpdate
+		state.inFlight += update
+		if state.inFlightCallback != nil && update < 0 {
+			select {
+			case state.inFlightCallback <- state.inFlight:
+				continue
+			default:
+				continue
+			}
+		}
+	}
+}
+
+func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit chan bool) {
+	var response *Response
+	defer w.Done()
+	for {
+		select {
+		case <-quit:
+			return
+		case response = <-state.responses:
+			state.inFlightUpdate <- -1
+			state.done++
+			state.progress <- response.err == nil
+			if response.err == nil {
+				state.totalTime += response.latency
+				state.goodNums = append(state.goodNums, response.request.num)
+				state.latencies = append(state.latencies, response.latency)
+			} else {
+				state.errors++
+			}
+			state.timeline = append(state.timeline, RequestTimes{
+				Start:   response.request.startTime,
+				Latency: response.latency,
+				Success:   response.err == nil,
+			})
+			adjuster.adjust(response)
+		}
 	}
 }
 
@@ -166,7 +232,7 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 	if succesful > 0 {
 		results.AverageSpeed = state.totalTime / time.Duration(succesful)
 		sort.Sort(state.latencies)
-		percentiles := []int{95, 90, 80, 70, 60, 50, 40, 30}
+		percentiles := []int{99, 95, 90, 80, 70, 60, 50, 40, 30}
 
 		for i := range percentiles {
 			s := strconv.Itoa(percentiles[i])
@@ -175,6 +241,12 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 		if config.mode == LowLatency {
 			results.FinalSpeed = state.speed
 		}
+
+		from := succesful - 10
+		if from < 0 {
+			from = 0
+		}
+		results.TopTen = state.latencies[from:]
 	}
 
 	results.Done = state.done
@@ -205,12 +277,12 @@ func getOperators(progress *Progress) *Operators {
 			operators.readAdjuster = &boundAdjuster{
 				boundTo: &progress.writes.speed,
 				boundBy: &config.rpw,
-				state:   &progress.reads,
+				state:   progress.reads,
 			}
 		} else {
-			operators.readAdjuster = newLatencyAdjuster(&progress.reads)
+			operators.readAdjuster = newLatencyAdjuster(progress.reads)
 		}
-		operators.writeAdjuster = newLatencyAdjuster(&progress.writes)
+		operators.writeAdjuster = newLatencyAdjuster(progress.writes)
 	case ConstantThreads:
 		operators.readEmitter = &threadedEmitter{}
 		operators.writeEmitter = &threadedEmitter{}
@@ -224,11 +296,11 @@ func getOperators(progress *Progress) *Operators {
 	}
 	switch config.engine {
 	case Sleep:
-		operators.writeRequster = newSleepRequster(&progress.writes)
-		operators.readRequester = newSleepRequster(&progress.reads)
+		operators.writeRequster = newSleepRequster(progress.writes)
+		operators.readRequester = newSleepRequster(progress.reads)
 	case Upload:
-		operators.writeRequster = newHTTPRequester(&progress.writes, &nullAuther{})
-		operators.readRequester = newHTTPRequester(&progress.reads, &nullAuther{})
+		operators.writeRequster = newHTTPRequester(progress.writes, &nullAuther{})
+		operators.readRequester = newHTTPRequester(progress.reads, &nullAuther{})
 	case S3:
 		s3Auther := s3Auther{
 			secretKey: config.S3SecretKey,
@@ -236,11 +308,11 @@ func getOperators(progress *Progress) *Operators {
 			bucket:    config.S3Bucket,
 			endpoint:  config.S3Endpoint,
 		}
-		operators.writeRequster = newHTTPRequester(&progress.writes, &s3Auther)
-		operators.readRequester = newHTTPRequester(&progress.reads, &s3Auther)
+		operators.writeRequster = newHTTPRequester(progress.writes, &s3Auther)
+		operators.readRequester = newHTTPRequester(progress.reads, &s3Auther)
 	case Disk:
-		operators.writeRequster = newDiskRequester(&progress.writes)
-		operators.readRequester = newDiskRequester(&progress.reads)
+		operators.writeRequster = newDiskRequester(progress.writes)
+		operators.readRequester = newDiskRequester(progress.reads)
 	case Null:
 		operators.writeRequster = &nullRequester{}
 		operators.readRequester = &nullRequester{}
@@ -263,6 +335,9 @@ func quitOnInterrupt() chan bool {
 	quit := make(chan bool)
 	signal.Notify(c, os.Interrupt)
 	signal.Notify(c, syscall.SIGTERM)
+	signal.Notify(c, syscall.SIGQUIT)
+	signal.Notify(c, syscall.SIGABRT)
+	signal.Notify(c, syscall.SIGINT)
 	go func() {
 		<-c
 		quit <- true
@@ -309,83 +384,86 @@ func displayProgress(state *OPState) {
 	}
 }
 
+func badRateAborter(state *OPState, result *OPResults, rate *int, stop chan bool) {
+	checkEvery := time.Millisecond * 3
+	lastCheck := time.Now()
+	for {
+		if state.inFlight > *rate {
+			result.StaggeredFor += time.Since(lastCheck)
+		}
+		if state.inFlight > *rate*2 && config.stopOnBadRate {
+			stop <- true
+		}
+		lastCheck = time.Now()
+		time.Sleep(checkEvery)
+	}
+}
+
 func makeLoad() {
-	quit := quitOnInterrupt()
+	interrupted := quitOnInterrupt()
+	stopWorkers := make(chan bool)
 	progress := Progress{
-		writes: OPState{
-			op:        WRITE,
-			goodNums:  make([]int64, 0, config.maxRequests),
-			colored:   ansi.ColorFunc("blue+h:black"),
-			responses: make(chan *Response, 100),
-			requests:  make(chan int, config.maxChannels*2),
-			progress:  make(chan bool, config.maxChannels*2),
-		},
-		reads: OPState{
-			op:        READ,
-			goodNums:  make([]int64, 0, config.maxRequests),
-			colored:   ansi.ColorFunc("green+h:black"),
-			responses: make(chan *Response, 100),
-			requests:  make(chan int, config.maxChannels*2),
-			progress:  make(chan bool, config.maxChannels*2),
-		},
+		writes: newOPState(WRITE, "blue"),
+		reads:  newOPState(READ, "green"),
 	}
 	progress.reads.speed = config.readThreads
 	progress.writes.speed = config.writeThreads
 	operators := getOperators(&progress)
 
 	for i := 0; i < config.maxChannels*2; i++ {
-		go startWorker(&progress, operators)
+		go startWorker(&progress, operators, stopWorkers)
 	}
-	go displayProgress(&progress.writes)
-	go displayProgress(&progress.reads)
+	go displayProgress(progress.writes)
+	go displayProgress(progress.reads)
+	go operators.writeEmitter.emitRequests(progress.writes)
+	go operators.readEmitter.emitRequests(progress.reads)
 	results := Results{
 		StartTime: time.Now(),
 	}
 	mainDone := make(chan bool)
+	stoppedByRate := make(chan bool)
+	w := &sync.WaitGroup{}
+	w.Add(2)
 	go func() {
+		go processResponses(progress.writes, operators.writeAdjuster, w, stopWorkers)
+		go processResponses(progress.reads, operators.readAdjuster, w, stopWorkers)
 	MAIN_LOOP:
-
 		for {
-			operators.writeEmitter.emitRequests(&progress.writes)
-			operators.readEmitter.emitRequests(&progress.reads)
-			var response *Response
 			select {
-			case <-quit:
-				config.output.report("Stopped by user")
+			case <-interrupted:
+				results.report("Stopped by user")
 				break MAIN_LOOP
-			case response = <-progress.writes.responses:
-				operators.writeAdjuster.adjust(response)
-				processResponse(response, &progress.writes)
-			case response = <-progress.reads.responses:
-				operators.readAdjuster.adjust(response)
-				processResponse(response, &progress.reads)
+			case <-stoppedByRate:
+				results.error("Could not sustain given rate")
+				break MAIN_LOOP
 			default:
-				time.Sleep(config.syncSleep)
+				time.Sleep(time.Millisecond)
 			}
 			if progress.reads.done+progress.writes.done > config.maxRequests {
 				results.report("Maximum requests count")
 				break
 			}
-			// TODO: Smarter aborter
-			if config.mode == ConstantRatio && config.stopOnBadRate {
-				if progress.writes.inFlight+progress.reads.inFlight > (config.wps+config.rps)*2 {
-					results.error("Could not sustain given rate")
-					os.Exit(2)
-				}
-			}
 		}
+		close(stopWorkers)
 		mainDone <- true
 	}()
 
+	if config.mode == ConstantRatio {
+		go badRateAborter(progress.writes, &results.Writes, &config.wps, stoppedByRate)
+		go badRateAborter(progress.reads, &results.Reads, &config.rps, stoppedByRate)
+	}
 	<-mainDone
-	fillResults(&results.Writes, &progress.writes, results.StartTime)
-	fillResults(&results.Reads, &progress.reads, results.StartTime)
+	w.Wait()
+	fillResults(&results.Writes, progress.writes, results.StartTime)
+	fillResults(&results.Reads, progress.reads, results.StartTime)
+	buildTimeline(progress.writes, progress.reads)
 	config.output.printResults(&results)
 }
 
 func validateParams() {
 	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
 		fmt.Println("OP/s and Threads flags are exclusive")
+		os.Exit(3)
 	}
 }
 
@@ -451,6 +529,7 @@ func configure() {
 	flag.StringVar(&config.outputFormat, "output", FormatHuman, "Output format(human/json), defaults to human")
 	flag.BoolVar(&config.showProgress, "show-progress", true, "Displays progress as dots")
 	flag.BoolVar(&config.stopOnBadRate, "stop-on-bad-rate", false, "Stops benchmark if cant maintain rate")
+	flag.StringVar(&config.timelineFile, "timeline-file", NotSetString, "Path to timeline.html (visual representation of progress)")
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)

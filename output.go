@@ -64,6 +64,7 @@ func (o *HumanOutput) printOpResult(r *OPResults, header string) {
 		for _, k := range keys {
 			fmt.Println("Percentile", k, "-", r.Percentiles[strconv.Itoa(k)])
 		}
+		fmt.Println("TopTen latencies: ", TimesList(r.TopTen))
 
 		if config.mode == LowLatency {
 			fmt.Printf("Threads with latency below %v: %v\n", config.maxLatency, r.FinalSpeed)
@@ -72,6 +73,9 @@ func (o *HumanOutput) printOpResult(r *OPResults, header string) {
 
 	fmt.Println("Total requests:", r.Done)
 	fmt.Println("Total errors:", r.Errors)
+	if config.mode == ConstantRatio {
+		fmt.Println("Staggered for:", r.StaggeredFor)
+	}
 	fmt.Println("Average OP/s: ", r.AverageOps)
 	fmt.Println("Average good OP/s: ", r.AverageGoodOps)
 	fmt.Println()
