@@ -35,10 +35,22 @@ must provide endpoint, see list here: http://docs.aws.amazon.com/general/latest/
 or use endpoint of your custom object storage with s3 interface  
 - `http` Planned. Simple single variable method http tester. Planned to support url template or weighted urls files list   
 
+##### URL Template
+- `-url` Defines url/file path template.  
+    XX (>=2 X-s) will be replaced with incremental numbers  
+    NN (>=2 N-s) in path will be replaced by random integers.  
+    RR (>=2 R-s) in path will be replaced by random a-zA-Z characters  
+    If no pattern specified same path will be used for all requests   
+
 ##### Output formatters
 `--output=`  
 - `human` Default, human readable output, also displays real time progress  
 - `json` Outputs results as json for automatic use by other processes  
+
+##### Timeline 
+`--timeline-file=template.html` When test done generates timelines of all requests, scale of X showed on top,
+X-scale represents time to process request, each line represents one request in order of emitting.  
+Meanwhile quick and dirty, more beautiful version in development  
 
 ##### Other options  
 - `-max-requests` Sets maximum requests count, defaults to 10000. (CTRL+C will abort and show stats)  
@@ -51,7 +63,6 @@ Defaults to 160KiB, supports human formats, 1KiB for 1024 bytes, 1k/1kb for 1000
 - `-max-latency` Searches for maximum threads count with defined maximum latency, supports human format (1s, 300ms)
 Combination of `-max-latency` and `-wt/-rt` will set initial threads count, useful if you know where to start, starting from 1 can take time to heat up  
 - `-rpw`  Reads per writes in search for max throughput mode   
-- `-url` Defines url/file path template. XXXXX in path will be replaced by incremental integers. If no pattern specified same path will be used for all requests   
 - `-max-channels` Sets maximum channel count, defaults to 500. May be useful if you got reasons to raise top threads count over 500    
 - `-stop-on-bad-rate` Stops execution if cannot maintain given rps/wps. Defaults to false  
 - `-show-progress` Displays progress of test execution. Defaults to true  
