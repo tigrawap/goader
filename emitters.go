@@ -5,13 +5,15 @@ import "time"
 type threadedEmitter struct{}
 
 func (emitter *threadedEmitter) emitRequests(state *OPState) {
-	state.inFlightCallback = make(chan int, 100)
+	state.inFlightCallback = make(chan int, config.maxChannels*2)
 	state.inFlightCallback <- 0
 	for {
 		inFlight := <-state.inFlightCallback
-		for state.speed > inFlight {
-			state.requests <- 1
-			state.inFlightUpdate <- 1
+		if state.speed > inFlight {
+			for i := 0; i < state.speed-inFlight; i++ {
+				state.requests <- 1
+				state.inFlightUpdate <- 1
+			}
 		}
 	}
 }
