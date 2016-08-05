@@ -29,15 +29,18 @@ func newHumanOutput() *HumanOutput {
 }
 
 func (o *HumanOutput) printer() {
+	var done bool
 	for {
 		select {
 		case <-o.quit:
-			fmt.Println()
-			for {
-				<-o.quit
+			if !done{
+				fmt.Println()
+				done = true
 			}
 		case s := <-o.pb:
-			fmt.Print(s)
+			if !done{
+				fmt.Print(s)
+			}
 		}
 	}
 }
