@@ -46,6 +46,7 @@ const (
 	Null            = "null"
 	NotSet          = -1
 	NotSetString    = ""
+	NotSetFloat64   = -1.0
 	FormatHuman     = "human"
 	FormatJSON      = "json"
 )
@@ -54,7 +55,7 @@ var config struct {
 	url           string //url/pattern
 	rps           int
 	wps           int
-	rpw           int
+	rpw           float64
 	writeThreads  int
 	readThreads   int
 	maxChannels   int
@@ -190,6 +191,7 @@ func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit
 	for {
 		select {
 		case <-quit:
+			println("Got exit signal", state.name)
 			return
 		case response = <-state.responses:
 			state.inFlightUpdate <- -1
@@ -270,24 +272,28 @@ type Operators struct {
 func getOperators(progress *Progress) *Operators {
 	operators := new(Operators)
 	switch config.mode {
-	case LowLatency:
-		operators.readEmitter = &threadedEmitter{}
+	case LowLatency, ConstantThreads:
 		operators.writeEmitter = &threadedEmitter{}
-		if config.writeThreads != 0 {
-			operators.readAdjuster = &boundAdjuster{
-				boundTo: &progress.writes.speed,
-				boundBy: &config.rpw,
-				state:   progress.reads,
-			}
+		if config.mode == LowLatency {
+			operators.writeAdjuster = newLatencyAdjuster(progress.writes)
 		} else {
-			operators.readAdjuster = newLatencyAdjuster(progress.reads)
+			operators.writeAdjuster = &nullAdjuster{}
 		}
-		operators.writeAdjuster = newLatencyAdjuster(progress.writes)
-	case ConstantThreads:
-		operators.readEmitter = &threadedEmitter{}
-		operators.writeEmitter = &threadedEmitter{}
-		operators.writeAdjuster = &nullAdjuster{}
-		operators.readAdjuster = &nullAdjuster{}
+
+		if config.rpw != NotSetFloat64 {
+			operators.readEmitter = &boundEmitter{
+				boundTo: &progress.writes.done,
+				boundBy: &config.rpw,
+			}
+			operators.readAdjuster = &nullAdjuster{}
+		} else {
+			operators.readEmitter = &threadedEmitter{}
+			if config.mode == LowLatency {
+				operators.readAdjuster = newLatencyAdjuster(progress.reads)
+			} else {
+				operators.readAdjuster = &nullAdjuster{}
+			}
+		}
 	case ConstantRatio:
 		operators.readEmitter = newRateEmitter(config.rps)
 		operators.writeEmitter = newRateEmitter(config.wps)
@@ -444,6 +450,7 @@ func makeLoad() {
 				break
 			}
 		}
+		println("closing workers")
 		close(stopWorkers)
 		mainDone <- true
 	}()
@@ -513,7 +520,7 @@ func configure() {
 	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
 	flag.IntVar(&config.writeThreads, "wt", NotSet, "Write threads")
 	flag.IntVar(&config.readThreads, "rt", NotSet, "Read threads")
-	flag.IntVar(&config.rpw, "rpw", 1, "Reads per write in search-for maximum mode")
+	flag.Float64Var(&config.rpw, "rpw", NotSetFloat64, "Reads per write")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
 	flag.IntVar(&config.maxChannels, "max-channels", 500, "Maximum threads")
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes")

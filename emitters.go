@@ -1,6 +1,8 @@
 package main
 
-import "time"
+import (
+	"time"
+)
 
 type threadedEmitter struct{}
 
@@ -15,6 +17,25 @@ func (emitter *threadedEmitter) emitRequests(state *OPState) {
 				state.inFlightUpdate <- 1
 			}
 		}
+	}
+}
+
+type boundEmitter struct {
+	boundTo *int64
+	boundBy *float64
+	emitted int64
+}
+
+func (e *boundEmitter) emitRequests(state *OPState) {
+	var shouldEmitted float64
+	for {
+		shouldEmitted = float64(*e.boundTo) * *e.boundBy
+		for int64(shouldEmitted) > e.emitted {
+			e.emitted++
+			state.inFlightUpdate <- 1
+			state.requests <- 1
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
