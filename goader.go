@@ -17,9 +17,12 @@ import (
 
 	"sync"
 
+	randc "crypto/rand"
+	"math/big"
+	"math/rand"
+
 	"github.com/dustin/go-humanize"
 	"github.com/mgutz/ansi"
-	"math/rand"
 )
 
 //Request struct
@@ -546,7 +549,8 @@ func configure() {
 	selectMode()
 	selectPrinter()
 	configureMode()
-	rand.Seed(time.Now().UTC().UnixNano())
+	n, err := randc.Int(randc.Reader, big.NewInt(1))
+	rand.Seed(n.Int64())
 
 }
 

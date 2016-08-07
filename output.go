@@ -33,12 +33,12 @@ func (o *HumanOutput) printer() {
 	for {
 		select {
 		case <-o.quit:
-			if !done{
+			if !done {
 				fmt.Println()
 				done = true
 			}
 		case s := <-o.pb:
-			if !done{
+			if !done {
 				fmt.Print(s)
 			}
 		}
