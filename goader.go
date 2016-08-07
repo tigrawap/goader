@@ -19,6 +19,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/mgutz/ansi"
+	"math/rand"
 )
 
 //Request struct
@@ -191,7 +192,6 @@ func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit
 	for {
 		select {
 		case <-quit:
-			println("Got exit signal", state.name)
 			return
 		case response = <-state.responses:
 			state.inFlightUpdate <- -1
@@ -450,7 +450,6 @@ func makeLoad() {
 				break
 			}
 		}
-		println("closing workers")
 		close(stopWorkers)
 		mainDone <- true
 	}()
@@ -547,6 +546,7 @@ func configure() {
 	selectMode()
 	selectPrinter()
 	configureMode()
+	rand.Seed(time.Now().UTC().UnixNano())
 
 }
 
