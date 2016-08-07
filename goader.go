@@ -557,8 +557,8 @@ func configure() {
 func main() {
 	configure()
 	maxprocs := runtime.GOMAXPROCS(0)
-	if maxprocs < 8 {
-		runtime.GOMAXPROCS(8)
+	if maxprocs < 16 {
+		runtime.GOMAXPROCS(16)
 	}
 	makeLoad()
 }
