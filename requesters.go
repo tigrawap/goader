@@ -61,12 +61,27 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 	requester.state = state
 	if state.op == WRITE {
 		requester.method = "PUT"
-		requester.data = make([]byte, config.bodySize)
+		var maxSize uint64
+		if config.maxBodySize != 0 {
+			maxSize = config.maxBodySize
+		} else {
+			maxSize = config.bodySize
+		}
+		requester.data = make([]byte, maxSize)
 		randc.Read(requester.data)
 	} else {
 		requester.method = "GET"
 	}
 	return &requester
+}
+
+func getPayload(fullData []byte) []byte {
+	if config.maxBodySize != 0 {
+		randomSize := rand.Int63n(int64(config.maxBodySize - config.minBodySize))
+		return fullData[0 : int64(config.minBodySize)+randomSize]
+	} else {
+		return fullData
+	}
 }
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
@@ -77,7 +92,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
 	if requester.data != nil {
-		req.SetBody(requester.data)
+		req.SetBody(getPayload(requester.data))
 	}
 	requester.auther.sign(req)
 	resp := fasthttp.AcquireResponse()
@@ -123,7 +138,7 @@ func (requester *diskRequester) request(responses chan *Response, request *Reque
 	var err error
 	start := time.Now()
 	if requester.state.op == WRITE {
-		err = ioutil.WriteFile(filename, requester.data, 0644)
+		err = ioutil.WriteFile(filename, getPayload(requester.data), 0644)
 	} else {
 		_, err = ioutil.ReadFile(filename)
 	}

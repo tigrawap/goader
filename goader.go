@@ -56,29 +56,33 @@ const (
 )
 
 var config struct {
-	url           string //url/pattern
-	rps           int
-	wps           int
-	rpw           float64
-	writeThreads  int
-	readThreads   int
-	maxChannels   int
-	maxRequests   int64
-	bodySize      uint64
-	bodySizeInput string
-	mode          string
-	engine        string
-	outputFormat  string
-	showProgress  bool
-	stopOnBadRate bool
-	output        Output
-	syncSleep     time.Duration
-	maxLatency    time.Duration
-	S3ApiKey      string
-	S3Bucket      string
-	S3Endpoint    string
-	S3SecretKey   string
-	timelineFile  string
+	url              string //url/pattern
+	rps              int
+	wps              int
+	rpw              float64
+	writeThreads     int
+	readThreads      int
+	maxChannels      int
+	maxRequests      int64
+	bodySize         uint64
+	minBodySize      uint64
+	maxBodySize      uint64
+	bodySizeInput    string
+	minBodySizeInput string
+	maxBodySizeInput string
+	mode             string
+	engine           string
+	outputFormat     string
+	showProgress     bool
+	stopOnBadRate    bool
+	output           Output
+	syncSleep        time.Duration
+	maxLatency       time.Duration
+	S3ApiKey         string
+	S3Bucket         string
+	S3Endpoint       string
+	S3SecretKey      string
+	timelineFile     string
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -474,6 +478,19 @@ func validateParams() {
 		fmt.Println("OP/s and Threads flags are exclusive")
 		os.Exit(3)
 	}
+	isSetMin := config.minBodySize != 0
+	isSetMax := config.maxBodySize != 0
+	if isSetMin || isSetMax {
+		if !(isSetMin && isSetMax) {
+			println("Should set both min/max body size")
+			os.Exit(3)
+		} else {
+			if config.minBodySize > config.maxBodySize {
+				println("Min body size should be less then max body size")
+				os.Exit(3)
+			}
+		}
+	}
 }
 
 func selectMode() {
@@ -525,7 +542,9 @@ func configure() {
 	flag.Float64Var(&config.rpw, "rpw", NotSetFloat64, "Reads per write")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
 	flag.IntVar(&config.maxChannels, "max-channels", 500, "Maximum threads")
-	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes")
+	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
+	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
+	flag.StringVar(&config.minBodySizeInput, "min-body-size", NotSetString, "Minimal body size for put requests (will randomize)")
 	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload")
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
 		"Max latency to allow when searching for maximum thread count")
@@ -542,6 +561,12 @@ func configure() {
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
+	if config.minBodySizeInput != NotSetString {
+		config.minBodySize, err = humanize.ParseBytes(config.minBodySizeInput)
+	}
+	if config.maxBodySizeInput != NotSetString {
+		config.maxBodySize, err = humanize.ParseBytes(config.maxBodySizeInput)
+	}
 	if err != nil {
 		fmt.Println(err.Error())
 	}
