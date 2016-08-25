@@ -70,9 +70,9 @@ func (f *templateFormatter) format(requestNum int64) string {
 func newTemplatedTarget() *TemplatedTarget {
 	i := TemplatedTarget{}
 	i.formatter = newTemplateFormatter(config.url)
+	i.targets = make(chan string, 1000)
 	go func() {
 		n := int64(0)
-		i.targets = make(chan string, 1000)
 		for {
 			n++
 			i.targets <- i.formatter.format(n)
@@ -82,7 +82,7 @@ func newTemplatedTarget() *TemplatedTarget {
 }
 
 func (i *TemplatedTarget) get() string {
-	return <-i.targets
+	return <- i.targets
 }
 
 // BoundTarget will set number of requests randomaly selected from bound slice

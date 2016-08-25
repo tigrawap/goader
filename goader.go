@@ -107,15 +107,13 @@ type Results struct {
 	StartTime time.Time
 }
 
-func startWorker(progress *Progress, operators *Operators, quit chan bool) {
+func startWorker(state *OPState, targeter Target, requester Requester, quit chan bool) {
 	for {
 		select {
 		case <-quit:
 			return
-		case <-progress.reads.requests:
-			operators.readRequester.request(progress.reads.responses, &Request{operators.readTarget.get(), time.Now()})
-		case <-progress.writes.requests:
-			operators.writeRequster.request(progress.writes.responses, &Request{operators.writeTarget.get(), time.Now()})
+		case <-state.requests:
+			requester.request(state.responses, &Request{targeter.get(), time.Now()})
 		}
 	}
 }
@@ -162,10 +160,10 @@ func newOPState(op op, color string) *OPState {
 		color:          color,
 		goodUrls:       make([]string, 0, config.maxRequests),
 		colored:        ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
-		responses:      make(chan *Response, config.maxChannels*2),
-		requests:       make(chan int, config.maxChannels*2),
-		progress:       make(chan bool, config.maxChannels*2),
-		inFlightUpdate: make(chan int, config.maxChannels*2),
+		responses:      make(chan *Response, 1000),
+		requests:       make(chan int, 1000),
+		progress:       make(chan bool, 1000),
+		inFlightUpdate: make(chan int, 1000),
 	}
 	go state.inFlightUpdater()
 	return &state
@@ -423,50 +421,59 @@ func makeLoad() {
 	progress.writes.speed = config.writeThreads
 	operators := getOperators(&progress)
 
-	for i := 0; i < config.maxChannels*2; i++ {
-		go startWorker(&progress, operators, stopWorkers)
-	}
 	go displayProgress(progress.writes)
 	go displayProgress(progress.reads)
-	go operators.writeEmitter.emitRequests(progress.writes)
-	go operators.readEmitter.emitRequests(progress.reads)
 	results := Results{
 		StartTime: time.Now(),
 	}
 	mainDone := make(chan bool)
+	workersDone := make(chan bool)
 	stoppedByRate := make(chan bool)
 	w := &sync.WaitGroup{}
 	w.Add(2)
 	go func() {
-		go processResponses(progress.writes, operators.writeAdjuster, w, stopWorkers)
-		go processResponses(progress.reads, operators.readAdjuster, w, stopWorkers)
-	MAIN_LOOP:
+	FOR_LOOP:
 		for {
 			select {
 			case <-interrupted:
 				results.report("Stopped by user")
-				break MAIN_LOOP
+				break FOR_LOOP
 			case <-stoppedByRate:
 				results.error("Could not sustain given rate")
-				break MAIN_LOOP
+				break FOR_LOOP
 			default:
 				time.Sleep(time.Millisecond)
 			}
-			if progress.reads.done+progress.writes.done > config.maxRequests {
+			if progress.reads.done+progress.writes.done >= config.maxRequests {
 				results.report("Maximum requests count")
 				break
 			}
 		}
 		close(stopWorkers)
 		mainDone <- true
+		w.Wait()
+		workersDone <- true
 	}()
 
+	go operators.writeEmitter.emitRequests(progress.writes)
+	go operators.readEmitter.emitRequests(progress.reads)
+	for i := 0; i < config.maxChannels; i++ {
+		go startWorker(progress.reads, operators.readTarget, operators.readRequester, stopWorkers)
+		go startWorker(progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers)
+	}
+	go processResponses(progress.writes, operators.writeAdjuster, w, stopWorkers)
+	go processResponses(progress.reads, operators.readAdjuster, w, stopWorkers)
 	if config.mode == ConstantRatio {
 		go badRateAborter(progress.writes, &results.Writes, &config.wps, stoppedByRate)
 		go badRateAborter(progress.reads, &results.Reads, &config.rps, stoppedByRate)
 	}
+
 	<-mainDone
-	w.Wait()
+	select {
+	case <-workersDone:
+	case <-time.After(5 * time.Second):
+		config.output.report("Workers close timed out")
+	}
 	fillResults(&results.Writes, progress.writes, results.StartTime)
 	fillResults(&results.Reads, progress.reads, results.StartTime)
 	buildTimeline(progress.writes, progress.reads)
@@ -541,7 +548,7 @@ func configure() {
 	flag.IntVar(&config.readThreads, "rt", NotSet, "Read threads")
 	flag.Float64Var(&config.rpw, "rpw", NotSetFloat64, "Reads per write")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
-	flag.IntVar(&config.maxChannels, "max-channels", 500, "Maximum threads")
+	flag.IntVar(&config.maxChannels, "max-channels", 32, "Maximum threads")
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
 	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
 	flag.StringVar(&config.minBodySizeInput, "min-body-size", NotSetString, "Minimal body size for put requests (will randomize)")

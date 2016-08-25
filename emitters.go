@@ -7,7 +7,7 @@ import (
 type threadedEmitter struct{}
 
 func (emitter *threadedEmitter) emitRequests(state *OPState) {
-	state.inFlightCallback = make(chan int, config.maxChannels*2)
+	state.inFlightCallback = make(chan int, 1000)
 	state.inFlightCallback <- 0
 	for {
 		inFlight := <-state.inFlightCallback
