@@ -485,6 +485,12 @@ func validateParams() {
 		fmt.Println("OP/s and Threads flags are exclusive")
 		os.Exit(3)
 	}
+	if config.writeThreads > config.maxChannels{
+		config.maxChannels = config.writeThreads
+	}
+	if config.readThreads > config.maxChannels{
+		config.maxChannels = config.readThreads
+	}
 	isSetMin := config.minBodySize != 0
 	isSetMax := config.maxBodySize != 0
 	if isSetMin || isSetMax {
