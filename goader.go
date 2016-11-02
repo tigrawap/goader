@@ -573,6 +573,7 @@ func configure() {
 	}
 	if config.maxBodySizeInput != NotSetString {
 		config.maxBodySize, err = humanize.ParseBytes(config.maxBodySizeInput)
+		config.bodySize = config.maxBodySize
 	}
 	if err != nil {
 		fmt.Println(err.Error())
