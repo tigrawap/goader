@@ -40,19 +40,20 @@ type Response struct {
 
 //Various constants to avoid typos
 const (
-	LowLatency      = "low-latency"
-	ConstantRatio   = "constant"
+	LowLatency = "low-latency"
+	ConstantRatio = "constant"
 	ConstantThreads = "constant-threads"
-	Sleep           = "sleep"
-	Upload          = "upload"
-	S3              = "s3"
-	Disk            = "disk"
-	Null            = "null"
-	NotSet          = -1
-	NotSetString    = ""
-	NotSetFloat64   = -1.0
-	FormatHuman     = "human"
-	FormatJSON      = "json"
+	Sleep = "sleep"
+	Upload = "upload"
+	Http = "http"
+	S3 = "s3"
+	Disk = "disk"
+	Null = "null"
+	NotSet = -1
+	NotSetString = ""
+	NotSetFloat64 = -1.0
+	FormatHuman = "human"
+	FormatJSON = "json"
 )
 
 var config struct {
@@ -221,9 +222,15 @@ func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit
 
 type timeArray []time.Duration
 
-func (a timeArray) Len() int           { return len(a) }
-func (a timeArray) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a timeArray) Less(i, j int) bool { return a[i] < a[j] }
+func (a timeArray) Len() int {
+	return len(a)
+}
+func (a timeArray) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+func (a timeArray) Less(i, j int) bool {
+	return a[i] < a[j]
+}
 
 func percentile(numbers timeArray, n int) time.Duration {
 	i := len(numbers) * n / 100
@@ -258,8 +265,8 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 
 	results.Done = state.done
 	results.Errors = state.errors
-	results.AverageOps = int64(float64(state.done*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
-	results.AverageGoodOps = int64(float64((state.done-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
+	results.AverageOps = int64(float64(state.done * int64(time.Second)) / float64(time.Since(startTime).Nanoseconds())) + 1
+	results.AverageGoodOps = int64(float64((state.done - state.errors) * int64(time.Second)) / float64(time.Since(startTime).Nanoseconds())) + 1
 }
 
 //Operators chosen by config
@@ -309,7 +316,7 @@ func getOperators(progress *Progress) *Operators {
 	case Sleep:
 		operators.writeRequster = newSleepRequster(progress.writes)
 		operators.readRequester = newSleepRequster(progress.reads)
-	case Upload:
+	case Upload, Http:
 		operators.writeRequster = newHTTPRequester(progress.writes, &nullAuther{})
 		operators.readRequester = newHTTPRequester(progress.reads, &nullAuther{})
 	case S3:
@@ -402,7 +409,7 @@ func badRateAborter(state *OPState, result *OPResults, rate *int, stop chan bool
 		if state.inFlight > *rate {
 			result.StaggeredFor += time.Since(lastCheck)
 		}
-		if state.inFlight > *rate*2 && config.stopOnBadRate {
+		if state.inFlight > *rate * 2 && config.stopOnBadRate {
 			stop <- true
 		}
 		lastCheck = time.Now()
@@ -432,7 +439,7 @@ func makeLoad() {
 	w := &sync.WaitGroup{}
 	w.Add(2)
 	go func() {
-	FOR_LOOP:
+		FOR_LOOP:
 		for {
 			select {
 			case <-interrupted:
@@ -444,7 +451,7 @@ func makeLoad() {
 			default:
 				time.Sleep(time.Millisecond)
 			}
-			if progress.reads.done+progress.writes.done >= config.maxRequests {
+			if progress.reads.done + progress.writes.done >= config.maxRequests {
 				results.report("Maximum requests count")
 				break
 			}
@@ -485,10 +492,10 @@ func validateParams() {
 		fmt.Println("OP/s and Threads flags are exclusive")
 		os.Exit(3)
 	}
-	if config.writeThreads > config.maxChannels{
+	if config.writeThreads > config.maxChannels {
 		config.maxChannels = config.writeThreads
 	}
-	if config.readThreads > config.maxChannels{
+	if config.readThreads > config.maxChannels {
 		config.maxChannels = config.readThreads
 	}
 	isSetMin := config.minBodySize != 0
@@ -558,7 +565,7 @@ func configure() {
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
 	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
 	flag.StringVar(&config.minBodySizeInput, "min-body-size", NotSetString, "Minimal body size for put requests (will randomize)")
-	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload")
+	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload/http")
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
 		"Max latency to allow when searching for maximum thread count")
 	// flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
