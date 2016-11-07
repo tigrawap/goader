@@ -1,7 +1,7 @@
 ### Goader intro
 
 Why another benchmarks utility?
-All known to me utilities got flows:
+All known to me utilities got flaws:
 
 - Too complex, UI or conffile based configuration to achieve wanted by everyone required effect  
 - Simple CLI utilities do not simulate real life scenarios  
