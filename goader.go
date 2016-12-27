@@ -40,50 +40,53 @@ type Response struct {
 
 //Various constants to avoid typos
 const (
-	LowLatency = "low-latency"
-	ConstantRatio = "constant"
+	LowLatency      = "low-latency"
+	ConstantRatio   = "constant"
 	ConstantThreads = "constant-threads"
-	Sleep = "sleep"
-	Upload = "upload"
-	Http = "http"
-	S3 = "s3"
-	Disk = "disk"
-	Null = "null"
-	NotSet = -1
-	NotSetString = ""
-	NotSetFloat64 = -1.0
-	FormatHuman = "human"
-	FormatJSON = "json"
+	Sleep           = "sleep"
+	Upload          = "upload"
+	Http            = "http"
+	S3              = "s3"
+	Disk            = "disk"
+	Null            = "null"
+	NotSet          = -1
+	NotSetString    = ""
+	NotSetFloat64   = -1.0
+	FormatHuman     = "human"
+	FormatJSON      = "json"
 )
 
 var config struct {
-	url              string //url/pattern
-	rps              int
-	wps              int
-	rpw              float64
-	writeThreads     int
-	readThreads      int
-	maxChannels      int
-	maxRequests      int64
-	bodySize         uint64
-	minBodySize      uint64
-	maxBodySize      uint64
-	bodySizeInput    string
-	minBodySizeInput string
-	maxBodySizeInput string
-	mode             string
-	engine           string
-	outputFormat     string
-	showProgress     bool
-	stopOnBadRate    bool
-	output           Output
-	syncSleep        time.Duration
-	maxLatency       time.Duration
-	S3ApiKey         string
-	S3Bucket         string
-	S3Endpoint       string
-	S3SecretKey      string
-	timelineFile     string
+	url                string //url/pattern
+	rps                int
+	wps                int
+	rpw                float64
+	writeThreads       int
+	readThreads        int
+	maxChannels        int
+	verbose            bool
+	maxRequests        int64
+	bodySize           uint64
+	minBodySize        uint64
+	maxBodySize        uint64
+	bodySizeInput      string
+	minBodySizeInput   string
+	maxBodySizeInput   string
+	mode               string
+	engine             string
+	outputFormat       string
+	showProgress       bool
+	stopOnBadRate      bool
+	output             Output
+	syncSleep          time.Duration
+	maxLatency         time.Duration
+	S3ApiKey           string
+	S3Bucket           string
+	S3Endpoint         string
+	S3Region           string
+	S3SecretKey        string
+	S3SignatureVersion int
+	timelineFile       string
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -123,7 +126,7 @@ type op int
 
 //Operation type
 const (
-	READ op = iota
+	READ  op = iota
 	WRITE
 )
 
@@ -192,7 +195,7 @@ func (state *OPState) inFlightUpdater() {
 	}
 }
 
-func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit chan bool) {
+func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sync.WaitGroup, quit chan bool) {
 	var response *Response
 	defer w.Done()
 	for {
@@ -208,6 +211,9 @@ func processResponses(state *OPState, adjuster Adjuster, w *sync.WaitGroup, quit
 				state.goodUrls = append(state.goodUrls, response.request.url)
 				state.latencies = append(state.latencies, response.latency)
 			} else {
+				if config.verbose {
+					results.reportError(response.err.Error())
+				}
 				state.errors++
 			}
 			state.timeline = append(state.timeline, RequestTimes{
@@ -320,14 +326,20 @@ func getOperators(progress *Progress) *Operators {
 		operators.writeRequster = newHTTPRequester(progress.writes, &nullAuther{})
 		operators.readRequester = newHTTPRequester(progress.reads, &nullAuther{})
 	case S3:
-		s3Auther := s3Auther{
+		s3params := s3Params{
 			secretKey: config.S3SecretKey,
 			apiKey:    config.S3ApiKey,
 			bucket:    config.S3Bucket,
 			endpoint:  config.S3Endpoint,
 		}
-		operators.writeRequster = newHTTPRequester(progress.writes, &s3Auther)
-		operators.readRequester = newHTTPRequester(progress.reads, &s3Auther)
+		var s3Auther S3Auther
+		if config.S3SignatureVersion == 4 {
+			s3Auther = &s3AutherV4{s3params}
+		} else {
+			s3Auther = &s3AutherV2{s3params}
+		}
+		operators.writeRequster = newHTTPRequester(progress.writes, s3Auther)
+		operators.readRequester = newHTTPRequester(progress.reads, s3Auther)
 	case Disk:
 		operators.writeRequster = newDiskRequester(progress.writes)
 		operators.readRequester = newDiskRequester(progress.reads)
@@ -368,9 +380,9 @@ func p(s string) {
 }
 
 //TODO: Don't really like this global variables, methods on result, global config. Need to rethink
-func (r *Results) error(s string) {
+func (r *Results) reportError(s string) {
 	r.Errors = append(r.Errors, s)
-	config.output.error(s)
+	config.output.reportError(s)
 }
 
 func (r *Results) report(s string) {
@@ -409,7 +421,7 @@ func badRateAborter(state *OPState, result *OPResults, rate *int, stop chan bool
 		if state.inFlight > *rate {
 			result.StaggeredFor += time.Since(lastCheck)
 		}
-		if state.inFlight > *rate * 2 && config.stopOnBadRate {
+		if state.inFlight > *rate*2 && config.stopOnBadRate {
 			stop <- true
 		}
 		lastCheck = time.Now()
@@ -439,19 +451,19 @@ func makeLoad() {
 	w := &sync.WaitGroup{}
 	w.Add(2)
 	go func() {
-		FOR_LOOP:
+	FOR_LOOP:
 		for {
 			select {
 			case <-interrupted:
 				results.report("Stopped by user")
 				break FOR_LOOP
 			case <-stoppedByRate:
-				results.error("Could not sustain given rate")
+				results.reportError("Could not sustain given rate")
 				break FOR_LOOP
 			default:
 				time.Sleep(time.Millisecond)
 			}
-			if progress.reads.done + progress.writes.done >= config.maxRequests {
+			if progress.reads.done+progress.writes.done >= config.maxRequests {
 				results.report("Maximum requests count")
 				break
 			}
@@ -468,8 +480,8 @@ func makeLoad() {
 		go startWorker(progress.reads, operators.readTarget, operators.readRequester, stopWorkers)
 		go startWorker(progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers)
 	}
-	go processResponses(progress.writes, operators.writeAdjuster, w, stopWorkers)
-	go processResponses(progress.reads, operators.readAdjuster, w, stopWorkers)
+	go processResponses(progress.writes, &results, operators.writeAdjuster, w, stopWorkers)
+	go processResponses(progress.reads, &results, operators.readAdjuster, w, stopWorkers)
 	if config.mode == ConstantRatio {
 		go badRateAborter(progress.writes, &results.Writes, &config.wps, stoppedByRate)
 		go badRateAborter(progress.reads, &results.Reads, &config.rps, stoppedByRate)
@@ -489,7 +501,7 @@ func makeLoad() {
 
 func validateParams() {
 	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
-		fmt.Println("OP/s and Threads flags are exclusive")
+		println("OP/s and Threads flags are exclusive")
 		os.Exit(3)
 	}
 	if config.writeThreads > config.maxChannels {
@@ -497,6 +509,22 @@ func validateParams() {
 	}
 	if config.readThreads > config.maxChannels {
 		config.maxChannels = config.readThreads
+	}
+	switch config.S3SignatureVersion {
+	case 2, 4:
+	default:
+		println("Wrong signature version, only 2 and 4 supported")
+		os.Exit(3)
+	}
+	if config.engine == S3 && config.S3SignatureVersion == 4 {
+		if config.S3Region == NotSetString {
+			println("Must specify region for request with V4 signature")
+			os.Exit(3)
+		}
+	}
+	if config.engine == S3 && config.S3Endpoint == NotSetString {
+		println("Must specify s3 endpoint in s3 mode")
+		os.Exit(3)
 	}
 	isSetMin := config.minBodySize != 0
 	isSetMax := config.maxBodySize != 0
@@ -574,9 +602,12 @@ func configure() {
 	flag.StringVar(&config.S3SecretKey, "s3-secret-key", NotSetString, "S3 secret key")
 	flag.StringVar(&config.S3Bucket, "s3-bucket", NotSetString, "S3 bucket")
 	flag.StringVar(&config.S3Endpoint, "s3-endpoint", NotSetString, "S3 endpoint")
+	flag.StringVar(&config.S3Region, "s3-region", NotSetString, "S3 region, must be set for V4 signature")
+	flag.IntVar(&config.S3SignatureVersion, "s3-sign-ver", 4, "S3 signature version, defaults to 4, supports 2/4")
 	flag.StringVar(&config.outputFormat, "output", FormatHuman, "Output format(human/json), defaults to human")
 	flag.BoolVar(&config.showProgress, "show-progress", true, "Displays progress as dots")
 	flag.BoolVar(&config.stopOnBadRate, "stop-on-bad-rate", false, "Stops benchmark if cant maintain rate")
+	flag.BoolVar(&config.verbose, "verbose", false, "Verbose output on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", NotSetString, "Path to timeline.html (visual representation of progress)")
 	flag.Parse()
 	var err error

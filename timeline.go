@@ -105,22 +105,22 @@ func buildTimeline(states ...*OPState) {
 	//fmt.Println(r)
 	tmpl, err := template.New("main").Parse(TIMELINE_TEMPLATE)
 	if err != nil {
-		config.output.error(err.Error())
+		config.output.reportError(err.Error())
 	}
 	b := bytes.Buffer{}
 	err = tmpl.Execute(&b, HTMLResult{r, maxDuration})
 	if err != nil {
-		config.output.error(err.Error())
+		config.output.reportError(err.Error())
 	}
 	//	b, err := json.Marshal(r)
 	//	fmt.Println(r)
 	//	fmt.Printf("%v\n", string(b[:]))
 	//	if err != nil {
-	//		config.output.error(err.Error())
+	//		config.output.reportError(err.Error())
 	//		return
 	//	}
 	err = ioutil.WriteFile(config.timelineFile, b.Bytes(), 0644)
 	if err != nil {
-		config.output.error(err.Error())
+		config.output.reportError(err.Error())
 	}
 }

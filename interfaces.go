@@ -36,7 +36,11 @@ type Target interface {
 //Output presents result in human or variable machine readable forms
 type Output interface {
 	progress(s string)
-	error(s string)
+	reportError(s string)
 	report(s string)
 	printResults(result *Results)
+}
+
+type S3Auther interface{
+	sign(r *fasthttp.Request)
 }

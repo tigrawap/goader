@@ -105,7 +105,7 @@ func (o *HumanOutput) stopStream() {
 
 }
 
-func (o *HumanOutput) error(s string) {
+func (o *HumanOutput) reportError(s string) {
 	o.stopStream()
 	fmt.Println("Error: ", s)
 }
@@ -118,5 +118,5 @@ func (o *HumanOutput) report(s string) {
 func (o *JSONOutput) report(s string) {
 }
 
-func (o *JSONOutput) error(s string) {
+func (o *JSONOutput) reportError(s string) {
 }

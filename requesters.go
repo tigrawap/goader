@@ -104,7 +104,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	if err != nil {
 		responses <- &Response{request, timeSpent,
-			fmt.Errorf("Bad request: %v", err)}
+			fmt.Errorf("Bad request: %s\n%s\n%s", err, resp.Header, resp.Body())}
 		return
 	}
 
@@ -112,7 +112,8 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 	case fasthttp.StatusOK, fasthttp.StatusCreated:
 		responses <- &Response{request, timeSpent, nil}
 	default:
-		responses <- &Response{request, timeSpent, fmt.Errorf("Error: %v ", resp.StatusCode())}
+		responses <- &Response{request, timeSpent,
+			fmt.Errorf("Error: %s \n%s \n%s ", resp.StatusCode(), resp.Header, resp.Body())}
 	}
 }
 
