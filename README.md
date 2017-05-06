@@ -10,10 +10,10 @@ What I mean by real scenarios:
 I)  At some point latency of your services grows, 500ms per request is not fun. 
 So you try to optimize things or even change backend. 
 Problem is, that all benchmarks have `concurrent requests` settings, but you dont really have this information  
-Information that you have - you got N requests per second and latency rised to X and X is not good.
+Information that you have - you got N requests per second and latency raised to X and X is not good.
 So when optimizing things it's important to know, what you will get with specific number of evenly distributed requests per second, not concurrent requests
 
-II) You got your service up, you truly beleive, that latency over 200ms is not usable. How many requests per second can it hold to maintain such latency? Yet again, `concurrent requests` does not answer this question
+II) You got your service up, you truly believe, that latency over 200ms is not usable. How many requests per second can it hold to maintain such latency? Yet again, `concurrent requests` does not answer this question
 
 While both this scenarios is good enough reason for this benchmark utility to exist, they can be more complex, like 10 file PUTS, 100 GETS per second, or search for maximum concurrent threads with specific GET to PUT ration
 
@@ -22,13 +22,13 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 - Simple url template, http://localhost/post/XXXXX. XXXXX will be replaced by incremental integers, (number of Xs>2)
 - Supports different output formatters, atm human|json, default is human
 
-#####Request engines  
+##### Request engines  
 `--requests-engine=`  
 - `null` Does nothing, useful for testing utility itself. At the moment reaches 700k requests per/sec  
 - `sleep` Requster. For testing, sleeps instead of making real requests,
  also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life 
 - `upload` Uploads (by PUT) and GET files (done, default engine).  
-- `disk` Writes/Reads to/from disk. Support for O_DIRECT is planned  
+- `disk` Writes/Reads to/from disk. Support for O\_DIRECT is planned  
 - `s3` Supported only signature version v2, v4 is planned. See `--help` for s3 params(bucket,keys,endpoint). 
 `-url` stands for object key(with usual templating support)
 must provide endpoint, see list here: http://docs.aws.amazon.com/general/latest/gr/rande.html

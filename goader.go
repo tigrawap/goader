@@ -248,9 +248,9 @@ func percentile(numbers timeArray, n int) time.Duration {
 
 func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 	results.Percentiles = make(map[string]time.Duration)
-	succesful := len(state.goodUrls)
-	if succesful > 0 {
-		results.AverageSpeed = state.totalTime / time.Duration(succesful)
+	successful := len(state.goodUrls)
+	if successful > 0 {
+		results.AverageSpeed = state.totalTime / time.Duration(successful)
 		sort.Sort(state.latencies)
 		percentiles := []int{99, 95, 90, 80, 70, 60, 50, 40, 30}
 
@@ -262,7 +262,7 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 			results.FinalSpeed = state.speed
 		}
 
-		from := succesful - 10
+		from := successful - 10
 		if from < 0 {
 			from = 0
 		}
@@ -534,7 +534,7 @@ func validateParams() {
 			os.Exit(3)
 		} else {
 			if config.minBodySize > config.maxBodySize {
-				println("Min body size should be less then max body size")
+				println("Min body size should be less than max body size")
 				os.Exit(3)
 			}
 		}
