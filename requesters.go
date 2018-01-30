@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 
 	"github.com/valyala/fasthttp"
+	"log"
 )
 
 type nullRequester struct {
@@ -78,14 +79,23 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 func getPayload(fullData []byte) []byte {
 	if config.maxBodySize != 0 {
 		randomSize := rand.Int63n(int64(config.maxBodySize - config.minBodySize))
-		return fullData[0 : int64(config.minBodySize)+randomSize]
+		return fullData[0: int64(config.minBodySize)+randomSize]
 	} else {
 		return fullData
 	}
 }
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
-	req := fasthttp.AcquireRequest()
+	var req *fasthttp.Request
+	for i := 0; i < 10 && req == nil; i++ {
+		req = fasthttp.AcquireRequest()
+		if req == nil {
+			log.Println("Could not acquire request object from fasthttp, retrying")
+		}
+	}
+	if req == nil {
+		log.Fatalln("Could not acquire request object from fasthttp pool after 10 retries")
+	}
 	defer fasthttp.ReleaseRequest(req)
 	req.SetRequestURI(request.url)
 
