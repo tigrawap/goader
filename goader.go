@@ -271,8 +271,8 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 
 	results.Done = state.done
 	results.Errors = state.errors
-	results.AverageOps = int64(float64(state.done * int64(time.Second)) / float64(time.Since(startTime).Nanoseconds())) + 1
-	results.AverageGoodOps = int64(float64((state.done - state.errors) * int64(time.Second)) / float64(time.Since(startTime).Nanoseconds())) + 1
+	results.AverageOps = int64(float64(state.done*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
+	results.AverageGoodOps = int64(float64((state.done-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
 }
 
 //Operators chosen by config
@@ -626,7 +626,7 @@ func configure() {
 	selectMode()
 	selectPrinter()
 	configureMode()
-	n, err := randc.Int(randc.Reader, big.NewInt(1))
+	n, err := randc.Int(randc.Reader, big.NewInt(1<<63-1))
 	rand.Seed(n.Int64())
 
 }
