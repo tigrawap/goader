@@ -6,6 +6,11 @@ import (
 	"time"
 	"bytes"
 	"math"
+	"os"
+	"log"
+	"bufio"
+	"io"
+	"strings"
 )
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -39,7 +44,6 @@ func startingSequenceLength(s []rune, startsWith rune) int {
 	return matched
 }
 
-//IncrementalTarget increases number of request one by one
 type TemplatedTarget struct {
 	targets   chan string
 	formatter URLFormatter
@@ -165,6 +169,11 @@ func (f *templateFormatter) format(requestNum int64) string {
 	return string(rr)
 }
 
+
+func (i *TemplatedTarget) get() string {
+	return <-i.targets
+}
+
 func newTemplatedTarget() *TemplatedTarget {
 	i := TemplatedTarget{}
 	i.formatter = newTemplateFormatter(config.url)
@@ -179,8 +188,58 @@ func newTemplatedTarget() *TemplatedTarget {
 	return &i
 }
 
-func (i *TemplatedTarget) get() string {
-	return <-i.targets
+type SourceFileTarget struct {
+	file string
+	targets   chan string
+}
+
+func (s *SourceFileTarget) get() string {
+	return <-s.targets
+}
+
+
+func (s *SourceFileTarget) keepPopulated() string {
+	file, err := os.Open(s.file)
+	if err != nil {
+		log.Panic(err)
+	}
+	for {
+		file.Seek(0, io.SeekStart)
+		r := bufio.NewReaderSize(file, 64*1024)
+		for {
+			url, err := r.ReadString('\n')
+			if url != "" {
+				url := strings.TrimSpace(url)
+				s.targets <- url
+			}
+			if err == io.EOF {
+				break
+			}
+		}
+	}
+}
+
+func newSourceFileTarget() *SourceFileTarget {
+	i := SourceFileTarget{
+		file:config.urlsSourceFile,
+	}
+	i.targets = make(chan string, 1000)
+	go i.keepPopulated()
+	go func() {
+	}()
+	return &i
+}
+
+func selectTargetByConfig() Target {
+	if config.url != NotSetString {
+		return newTemplatedTarget()
+	}else if config.urlsSourceFile != NotSetString{
+		return newSourceFileTarget()
+	}else{
+		log.Println("None of [url/url-source] supplied")
+		os.Exit(1)
+		return nil
+	}
 }
 
 // BoundTarget will set number of requests randomaly selected from bound slice
@@ -197,4 +256,20 @@ func (b *BoundTarget) get() string {
 		}
 		return urls[rand.Intn(int(len(urls)))]
 	}
+}
+
+func dumpWrittenUrls(goodUrls []string) {
+	if config.writtenUrlsDump == NotSetString {
+		return
+	}
+	f, err := os.Create(config.writtenUrlsDump)
+	if err != nil {
+		log.Println("Error dumping urls:", err)
+		return
+	}
+	w := bufio.NewWriterSize(f, 1024*64)
+	for _, url := range goodUrls {
+		w.WriteString(url + "\n")
+	}
+	w.Flush()
 }
