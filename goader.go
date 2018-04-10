@@ -63,6 +63,7 @@ var config struct {
 	rpw                float64
 	writeThreads       int
 	readThreads        int
+	mkdirs             bool
 	maxChannels        int
 	verbose            bool
 	maxRequests        int64
@@ -607,12 +608,13 @@ func configure() {
 	flag.StringVar(&config.outputFormat, "output", FormatHuman, "Output format(human/json), defaults to human")
 	flag.BoolVar(&config.showProgress, "show-progress", true, "Displays progress as dots")
 	flag.BoolVar(&config.stopOnBadRate, "stop-on-bad-rate", false, "Stops benchmark if cant maintain rate")
+	flag.BoolVar(&config.mkdirs, "mkdirs", false, "mkdir missing dirs on-write")
 	flag.BoolVar(&config.verbose, "verbose", false, "Verbose output on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", NotSetString, "Path to timeline.html (visual representation of progress)")
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
-	if config.url == NotSetString && flag.NArg() == 1{
+	if config.url == NotSetString && flag.NArg() == 1 {
 		config.url = flag.Args()[0]
 	}
 	if config.minBodySizeInput != NotSetString {

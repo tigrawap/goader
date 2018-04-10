@@ -11,6 +11,8 @@ import (
 
 	"github.com/valyala/fasthttp"
 	"log"
+	"os"
+	"path"
 )
 
 type nullRequester struct {
@@ -144,12 +146,24 @@ func newDiskRequester(state *OPState) *diskRequester {
 }
 
 func (requester *diskRequester) request(responses chan *Response, request *Request) {
+	requester.doRequest(responses, request, false)
+}
+
+
+func (requester *diskRequester) doRequest(responses chan *Response, request *Request, isRetry bool) {
 	filename := request.url
 
 	var err error
 	start := time.Now()
 	if requester.state.op == WRITE {
 		err = ioutil.WriteFile(filename, getPayload(requester.data), 0644)
+		if os.IsNotExist(err) && config.mkdirs{
+			err = os.MkdirAll(path.Dir(filename), 0755)
+			if !isRetry{
+				requester.doRequest(responses, request, true)
+				return
+			}
+		}
 	} else {
 		_, err = ioutil.ReadFile(filename)
 	}
