@@ -612,6 +612,9 @@ func configure() {
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
+	if config.url == NotSetString && flag.NArg() == 1{
+		config.url = flag.Args()[0]
+	}
 	if config.minBodySizeInput != NotSetString {
 		config.minBodySize, err = humanize.ParseBytes(config.minBodySizeInput)
 	}
