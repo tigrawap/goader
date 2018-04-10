@@ -10,6 +10,9 @@ import (
 	"io/ioutil"
 
 	"github.com/valyala/fasthttp"
+	"log"
+	"os"
+	"path"
 )
 
 type nullRequester struct {
@@ -78,14 +81,23 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 func getPayload(fullData []byte) []byte {
 	if config.maxBodySize != 0 {
 		randomSize := rand.Int63n(int64(config.maxBodySize - config.minBodySize))
-		return fullData[0 : int64(config.minBodySize)+randomSize]
+		return fullData[0: int64(config.minBodySize)+randomSize]
 	} else {
 		return fullData
 	}
 }
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
-	req := fasthttp.AcquireRequest()
+	var req *fasthttp.Request
+	for i := 0; i < 10 && req == nil; i++ {
+		req = fasthttp.AcquireRequest()
+		if req == nil {
+			log.Println("Could not acquire request object from fasthttp, retrying")
+		}
+	}
+	if req == nil {
+		log.Fatalln("Could not acquire request object from fasthttp pool after 10 retries")
+	}
 	defer fasthttp.ReleaseRequest(req)
 	req.SetRequestURI(request.url)
 
@@ -134,12 +146,24 @@ func newDiskRequester(state *OPState) *diskRequester {
 }
 
 func (requester *diskRequester) request(responses chan *Response, request *Request) {
+	requester.doRequest(responses, request, false)
+}
+
+
+func (requester *diskRequester) doRequest(responses chan *Response, request *Request, isRetry bool) {
 	filename := request.url
 
 	var err error
 	start := time.Now()
 	if requester.state.op == WRITE {
 		err = ioutil.WriteFile(filename, getPayload(requester.data), 0644)
+		if os.IsNotExist(err) && config.mkdirs{
+			err = os.MkdirAll(path.Dir(filename), 0755)
+			if !isRetry{
+				requester.doRequest(responses, request, true)
+				return
+			}
+		}
 	} else {
 		_, err = ioutil.ReadFile(filename)
 	}
