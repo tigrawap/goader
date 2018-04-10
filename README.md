@@ -29,7 +29,7 @@ While both this scenarios is good enough reason for this benchmark utility to ex
  also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life 
 - `upload` Uploads (by PUT) and GET files (done, default engine).  
 - `disk` Writes/Reads to/from disk. Support for O_DIRECT is planned  
-- `s3` Supported only signature version v2, v4 is planned. See `--help` for s3 params(bucket,keys,endpoint). 
+- `s3` See `--help` for s3 params(bucket,keys,endpoint).
 `-url` stands for object key(with usual templating support)
 must provide endpoint, see list here: http://docs.aws.amazon.com/general/latest/gr/rande.html
 or use endpoint of your custom object storage with s3 interface  
