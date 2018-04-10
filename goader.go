@@ -593,7 +593,7 @@ func configure() {
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
 	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
 	flag.StringVar(&config.minBodySizeInput, "min-body-size", NotSetString, "Minimal body size for put requests (will randomize)")
-	flag.StringVar(&config.engine, "requests-engine", Upload, "s3/sleep/upload/http")
+	flag.StringVar(&config.engine, "requests-engine", Disk, "s3/sleep/upload/http")
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
 		"Max latency to allow when searching for maximum thread count")
 	// flag.StringVar(&config.mode, "mode", LowLatency, "Testing mode [low-latency / constant]")
