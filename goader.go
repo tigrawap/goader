@@ -52,7 +52,7 @@ const (
 	Null            = "null"
 	NotSet          = -1
 	EmptyString     = ""
-	NotSetString	= "_GOADER_NOT_SET_"
+	NotSetString    = "_GOADER_NOT_SET_"
 	NotSetFloat64   = -1.0
 	FormatHuman     = "human"
 	FormatJSON      = "json"
@@ -60,7 +60,7 @@ const (
 
 var config struct {
 	url                string //url/pattern
-	urlsSourceFile      string //url/pattern
+	urlsSourceFile     string //url/pattern
 	writtenUrlsDump    string
 	rps                int
 	wps                int
@@ -92,6 +92,7 @@ var config struct {
 	S3SecretKey        string
 	S3SignatureVersion int
 	timelineFile       string
+	seed               int64
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -620,6 +621,7 @@ func configure() {
 	flag.BoolVar(&config.mkdirs, "mkdirs", false, "mkdir missing dirs on-write")
 	flag.BoolVar(&config.verbose, "verbose", false, "Verbose output on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", EmptyString, "Path to timeline.html (visual representation of progress)")
+	flag.Int64Var(&config.seed, "seed", NotSet, "Seed to use in random generator")
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
@@ -641,7 +643,11 @@ func configure() {
 	selectPrinter()
 	configureMode()
 	n, err := randc.Int(randc.Reader, big.NewInt(1<<63-1))
-	rand.Seed(n.Int64())
+	if config.seed == NotSet {
+		rand.Seed(n.Int64())
+	}else{
+		rand.Seed(config.seed)
+	}
 
 }
 
