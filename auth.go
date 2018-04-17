@@ -69,7 +69,7 @@ func (a *s3AutherV4) sign(r *fasthttp.Request) {
 	r.SetRequestURI(fmt.Sprintf("http://%s/%s", a.endpoint, bucketKey))
 	r.Header.Set("x-amz-date", dateFull)
 	r.Header.Set("Content-Type", "text/html")
-	if config.S3ApiKey == NotSetString && config.S3SecretKey == NotSetString {
+	if config.S3ApiKey == EmptyString && config.S3SecretKey == EmptyString {
 		return
 	}
 	var payload []byte
@@ -112,7 +112,7 @@ func (a *s3AutherV2) sign(r *fasthttp.Request) {
 	r.Header.Set("Date", date)
 	r.Header.Set("Content-Type", "text/html")
 
-	if config.S3ApiKey == NotSetString && config.S3SecretKey == NotSetString {
+	if config.S3ApiKey == EmptyString && config.S3SecretKey == EmptyString {
 		return
 	}
 	stringToSign := bytes.Buffer{}

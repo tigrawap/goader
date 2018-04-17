@@ -231,9 +231,9 @@ func newSourceFileTarget() *SourceFileTarget {
 }
 
 func selectTargetByConfig() Target {
-	if config.url != NotSetString {
+	if config.url != EmptyString {
 		return newTemplatedTarget()
-	}else if config.urlsSourceFile != NotSetString{
+	}else if config.urlsSourceFile != EmptyString {
 		return newSourceFileTarget()
 	}else{
 		log.Println("None of [url/url-source] supplied")
@@ -259,7 +259,7 @@ func (b *BoundTarget) get() string {
 }
 
 func dumpWrittenUrls(goodUrls []string) {
-	if config.writtenUrlsDump == NotSetString {
+	if config.writtenUrlsDump == EmptyString {
 		return
 	}
 	f, err := os.Create(config.writtenUrlsDump)

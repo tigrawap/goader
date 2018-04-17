@@ -61,7 +61,7 @@ const TIMELINE_TEMPLATE = `
 `
 
 func buildTimeline(states ...*OPState) {
-	if config.timelineFile == NotSetString {
+	if config.timelineFile == EmptyString {
 		return
 	}
 	r := ResultingTimeLine{}
