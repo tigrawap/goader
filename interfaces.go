@@ -41,6 +41,6 @@ type Output interface {
 	printResults(result *Results)
 }
 
-type S3Auther interface{
+type S3Auther interface {
 	sign(r *fasthttp.Request)
 }

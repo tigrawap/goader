@@ -89,6 +89,13 @@ func getPayload(fullData []byte) []byte {
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
 	var req *fasthttp.Request
+	defer func() {
+		if err := recover(); err != nil { //catch
+			responses <- &Response{&Request{"BAD_URL", time.Now()}, time.Nanosecond,
+				fmt.Errorf("Error: %s", "panic")}
+				return
+		}
+	}()
 	for i := 0; i < 10 && req == nil; i++ {
 		req = fasthttp.AcquireRequest()
 		if req == nil {
@@ -149,7 +156,6 @@ func (requester *diskRequester) request(responses chan *Response, request *Reque
 	requester.doRequest(responses, request, false)
 }
 
-
 func (requester *diskRequester) doRequest(responses chan *Response, request *Request, isRetry bool) {
 	filename := request.url
 
@@ -157,9 +163,9 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 	start := time.Now()
 	if requester.state.op == WRITE {
 		err = ioutil.WriteFile(filename, getPayload(requester.data), 0644)
-		if os.IsNotExist(err) && config.mkdirs{
+		if os.IsNotExist(err) && config.mkdirs {
 			err = os.MkdirAll(path.Dir(filename), 0755)
-			if !isRetry{
+			if !isRetry {
 				requester.doRequest(responses, request, true)
 				return
 			}
