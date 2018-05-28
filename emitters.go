@@ -1,22 +1,32 @@
 package main
 
 import (
+	"sync/atomic"
 	"time"
 )
 
 type threadedEmitter struct{}
 
 func (emitter *threadedEmitter) emitRequests(state *OPState) {
-	state.inFlightCallback = make(chan int, 1000)
-	state.inFlightCallback <- 0
+	if state.speed <= 0 {
+		return
+	}
+	var inFlight int32
+	//MAINLOOP:
+	state.inFlightCallback = make(chan int32, 1000)
 	for {
-		inFlight := <-state.inFlightCallback
-		if state.speed > inFlight {
-			for i := 0; i < state.speed-inFlight; i++ {
-				state.requests <- 1
-				state.inFlightUpdate <- 1
+		if inFlight >= int32(state.speed) {
+		FOR:
+			for {
+				select {
+				case inFlight = <-state.inFlightCallback:
+				default:
+					break FOR
+				}
 			}
 		}
+		inFlight = atomic.AddInt32(&state.inFlight, 1)
+		state.requests <- 1
 	}
 }
 
@@ -32,7 +42,7 @@ func (e *boundEmitter) emitRequests(state *OPState) {
 		shouldEmitted = float64(*e.boundTo) * *e.boundBy
 		for int64(shouldEmitted) > e.emitted {
 			e.emitted++
-			state.inFlightUpdate <- 1
+			atomic.AddInt32(&state.inFlight, 1)
 			state.requests <- 1
 		}
 		time.Sleep(time.Millisecond)
@@ -85,7 +95,7 @@ func (emitter *rateEmitter) emitRequests(state *OPState) {
 		totalTimePassed := time.Since(emitter.startedAt)
 		shouldEmit := int(totalTimePassed / emitter.emitEvery)
 		notEmitted := shouldEmit - emitter.totalEmitted
-		state.inFlightUpdate <- notEmitted
+		atomic.AddInt32(&state.inFlight, int32(notEmitted))
 		emitter.totalEmitted += notEmitted
 		for i := 0; i < notEmitted; i++ {
 			emitter.sendRequest(state)

@@ -9,9 +9,9 @@ import (
 	"bytes"
 	"crypto/sha1"
 
-	"github.com/valyala/fasthttp"
-	"encoding/hex"
 	"crypto/sha256"
+	"encoding/hex"
+	"github.com/valyala/fasthttp"
 )
 
 type nullAuther struct {
@@ -21,7 +21,7 @@ func (a *nullAuther) sign(r *fasthttp.Request) {
 
 }
 
-type s3Params struct{
+type s3Params struct {
 	secretKey string
 	apiKey    string
 	bucket    string
@@ -36,24 +36,24 @@ type s3AutherV4 struct {
 	s3Params
 }
 
-func sign(payload []byte, key []byte) []byte{
+func sign(payload []byte, key []byte) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(payload)
 	return mac.Sum(nil)
 }
 
-func signSha1(payload []byte, key []byte) []byte{
+func signSha1(payload []byte, key []byte) []byte {
 	mac := hmac.New(sha1.New, key)
 	mac.Write(payload)
 	return mac.Sum(nil)
 }
 
-func getHash(payload []byte, key []byte) string{
+func getHash(payload []byte, key []byte) string {
 	signed := sign(payload, key)
 	return hex.EncodeToString(signed)
 }
 
-func getSha256(payload []byte) string{
+func getSha256(payload []byte) string {
 	hash := sha256.Sum256(payload)
 	return hex.EncodeToString(hash[:])
 }
@@ -75,7 +75,7 @@ func (a *s3AutherV4) sign(r *fasthttp.Request) {
 	var payload []byte
 	if string(r.Header.Method()) == "GET" {
 		payload = []byte("")
-	}else{
+	} else {
 		payload = r.Body()
 	}
 	payloadHash := getSha256(payload)

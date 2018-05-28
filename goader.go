@@ -24,6 +24,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/mgutz/ansi"
 	"log"
+	"sync/atomic"
 )
 
 //Request struct
@@ -117,13 +118,17 @@ type Results struct {
 	StartTime time.Time
 }
 
-func startWorker(state *OPState, targeter Target, requester Requester, quit chan bool) {
+func startWorker(progress *Progress, state *OPState, targeter Target, requester Requester, quit chan bool) {
 	for {
 		select {
 		case <-quit:
 			return
 		case <-state.requests:
-			requester.request(state.responses, &Request{targeter.get(), time.Now()})
+			if !(atomic.AddInt64(&progress.totalRequests, 1) > config.maxRequests) {
+				requester.request(state.responses, &Request{targeter.get(), time.Now()})
+			} else {
+				return
+			}
 		}
 	}
 }
@@ -142,7 +147,8 @@ type OPState struct {
 	speed            int
 	done             int64
 	errors           int64
-	inFlight         int
+	inFlight         int32
+	slicesLock       sync.RWMutex
 	goodUrls         []string
 	op               op
 	name             string
@@ -152,8 +158,7 @@ type OPState struct {
 	responses        chan *Response
 	requests         chan int
 	progress         chan bool
-	inFlightUpdate   chan int
-	inFlightCallback chan int
+	inFlightCallback chan int32
 	timeline         TimeLine
 }
 
@@ -165,40 +170,37 @@ func newOPState(op op, color string) *OPState {
 		name = "read"
 	}
 	state := OPState{
-		op:             op,
-		name:           name,
-		color:          color,
-		goodUrls:       make([]string, 0, config.maxRequests),
-		colored:        ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
-		responses:      make(chan *Response, 1000),
-		requests:       make(chan int, 1000),
-		progress:       make(chan bool, 1000),
-		inFlightUpdate: make(chan int, 1000),
+		op:        op,
+		name:      name,
+		color:     color,
+		goodUrls:  make([]string, 0, config.maxRequests),
+		colored:   ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
+		responses: make(chan *Response, 1000),
+		requests:  make(chan int, 1000),
+		progress:  make(chan bool, 1000),
 	}
-	go state.inFlightUpdater()
 	return &state
 }
 
 // Progress of benchmark
 type Progress struct {
-	reads  *OPState
-	writes *OPState
+	totalRequests int64
+	reads         *OPState
+	writes        *OPState
 }
 
-func (state *OPState) inFlightUpdater() {
-	var update int
-	for {
-		update = <-state.inFlightUpdate
-		state.inFlight += update
-		if state.inFlightCallback != nil && update < 0 {
-			select {
-			case state.inFlightCallback <- state.inFlight:
-				continue
-			default:
-				continue
-			}
-		}
-	}
+func (state *OPState) opDone() {
+	atomic.AddInt64(&state.done, 1)
+	go state.inFlightDecrease()
+}
+
+func (state *OPState) getDone() int64 {
+	return atomic.LoadInt64(&state.done)
+}
+
+func (state *OPState) inFlightDecrease() {
+	res := atomic.AddInt32(&state.inFlight, -1)
+	state.inFlightCallback <- res
 }
 
 func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sync.WaitGroup, quit chan bool) {
@@ -209,13 +211,14 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 		case <-quit:
 			return
 		case response = <-state.responses:
-			state.inFlightUpdate <- -1
-			state.done++
+			state.opDone()
 			state.progress <- response.err == nil
 			if response.err == nil {
 				state.totalTime += response.latency
+				state.slicesLock.Lock()
 				state.goodUrls = append(state.goodUrls, response.request.url)
 				state.latencies = append(state.latencies, response.latency)
+				state.slicesLock.Unlock()
 			} else {
 				if config.verbose {
 					results.reportError(response.err.Error())
@@ -275,10 +278,10 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 		results.TopTen = state.latencies[from:]
 	}
 
-	results.Done = state.done
+	results.Done = state.getDone()
 	results.Errors = state.errors
-	results.AverageOps = int64(float64(state.done*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
-	results.AverageGoodOps = int64(float64((state.done-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
+	results.AverageOps = int64(float64(state.getDone()*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
+	results.AverageGoodOps = int64(float64((state.getDone()-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
 }
 
 //Operators chosen by config
@@ -361,6 +364,7 @@ func getOperators(progress *Progress) *Operators {
 	if config.wps > 0 || config.writeThreads > 0 {
 		operators.readTarget = &BoundTarget{
 			bound: &progress.writes.goodUrls,
+			sync:  progress.writes.slicesLock.RLocker(),
 		}
 	} else {
 		operators.readTarget = selectTargetByConfig()
@@ -425,11 +429,12 @@ func displayProgress(state *OPState) {
 func badRateAborter(state *OPState, result *OPResults, rate *int, stop chan bool) {
 	checkEvery := time.Millisecond * 3
 	lastCheck := time.Now()
+
 	for {
-		if state.inFlight > *rate {
+		if state.inFlight > int32(*rate) {
 			result.StaggeredFor += time.Since(lastCheck)
 		}
-		if state.inFlight > *rate*2 && config.stopOnBadRate {
+		if state.inFlight > int32(*rate)*2 && config.stopOnBadRate {
 			stop <- true
 		}
 		lastCheck = time.Now()
@@ -471,7 +476,7 @@ func makeLoad() {
 			default:
 				time.Sleep(time.Millisecond)
 			}
-			if progress.reads.done+progress.writes.done >= config.maxRequests {
+			if progress.reads.getDone()+progress.writes.getDone() >= config.maxRequests {
 				results.report("Maximum requests count")
 				break
 			}
@@ -484,9 +489,10 @@ func makeLoad() {
 
 	go operators.writeEmitter.emitRequests(progress.writes)
 	go operators.readEmitter.emitRequests(progress.reads)
+
 	for i := 0; i < config.maxChannels; i++ {
-		go startWorker(progress.reads, operators.readTarget, operators.readRequester, stopWorkers)
-		go startWorker(progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers)
+		go startWorker(&progress, progress.reads, operators.readTarget, operators.readRequester, stopWorkers)
+		go startWorker(&progress, progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers)
 	}
 	go processResponses(progress.writes, &results, operators.writeAdjuster, w, stopWorkers)
 	go processResponses(progress.reads, &results, operators.readAdjuster, w, stopWorkers)
@@ -645,7 +651,7 @@ func configure() {
 	n, err := randc.Int(randc.Reader, big.NewInt(1<<63-1))
 	if config.seed == NotSet {
 		rand.Seed(n.Int64())
-	}else{
+	} else {
 		rand.Seed(config.seed)
 	}
 

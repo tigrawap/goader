@@ -1,9 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"time"
-	"fmt"
 )
 
 type nullAdjuster struct {
@@ -48,7 +48,7 @@ const thresholdPercent = 5
 
 func (a *latencyAdjuster) adjust(response *Response) {
 	a.movingCount++
-	barrierPenalty := (a.state.speed+1) - a.barrier
+	barrierPenalty := (a.state.speed + 1) - a.barrier
 	sample := int(math.Log(float64(a.state.speed)) * logbase)
 	if barrierPenalty > 0 && a.barrier > 0 {
 		sample += a.state.speed * barrierPenalty

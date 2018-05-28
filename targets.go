@@ -1,16 +1,17 @@
 package main
 
 import (
-	"fmt"
-	"math/rand"
-	"time"
-	"bytes"
-	"math"
-	"os"
-	"log"
 	"bufio"
+	"bytes"
+	"fmt"
 	"io"
+	"log"
+	"math"
+	"math/rand"
+	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -149,7 +150,7 @@ func newTemplateFormatter(url string) *templateFormatter {
 				formatter.templateParts = append(formatter.templateParts, templatePart{
 					offset:          i,
 					length:          matched,
-					replacementFunc: matcher.makeReplacementFunc(rurl[i:i+matched]),
+					replacementFunc: matcher.makeReplacementFunc(rurl[i : i+matched]),
 				})
 				i += matched - 1
 			}
@@ -168,7 +169,6 @@ func (f *templateFormatter) format(requestNum int64) string {
 	}
 	return string(rr)
 }
-
 
 func (i *TemplatedTarget) get() string {
 	return <-i.targets
@@ -189,14 +189,13 @@ func newTemplatedTarget() *TemplatedTarget {
 }
 
 type SourceFileTarget struct {
-	file string
-	targets   chan string
+	file    string
+	targets chan string
 }
 
 func (s *SourceFileTarget) get() string {
 	return <-s.targets
 }
-
 
 func (s *SourceFileTarget) keepPopulated() string {
 	file, err := os.Open(s.file)
@@ -221,7 +220,7 @@ func (s *SourceFileTarget) keepPopulated() string {
 
 func newSourceFileTarget() *SourceFileTarget {
 	i := SourceFileTarget{
-		file:config.urlsSourceFile,
+		file: config.urlsSourceFile,
 	}
 	i.targets = make(chan string, 1000)
 	go i.keepPopulated()
@@ -233,9 +232,9 @@ func newSourceFileTarget() *SourceFileTarget {
 func selectTargetByConfig() Target {
 	if config.url != EmptyString {
 		return newTemplatedTarget()
-	}else if config.urlsSourceFile != EmptyString {
+	} else if config.urlsSourceFile != EmptyString {
 		return newSourceFileTarget()
-	}else{
+	} else {
 		log.Println("None of [url/url-source] supplied")
 		os.Exit(1)
 		return nil
@@ -245,16 +244,21 @@ func selectTargetByConfig() Target {
 // BoundTarget will set number of requests randomaly selected from bound slice
 type BoundTarget struct {
 	bound *[]string
+	sync  sync.Locker
 }
 
-func (b *BoundTarget) get() string {
+func (b *BoundTarget) get() (ret string) {
 	for {
+		b.sync.Lock()
 		urls := *b.bound
 		if len(urls) == 0 {
+			b.sync.Unlock()
 			time.Sleep(time.Millisecond)
 			continue
 		}
-		return urls[rand.Intn(int(len(urls)))]
+		ret = urls[rand.Intn(int(len(urls)))]
+		b.sync.Unlock()
+		return
 	}
 }
 

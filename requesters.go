@@ -24,11 +24,12 @@ type sleepRequster struct {
 }
 
 func (n *nullRequester) request(responses chan *Response, request *Request) {
+	fmt.Fprint(ioutil.Discard, request.url)
 	responses <- &Response{request, time.Nanosecond, nil}
 }
 
 func (requester *sleepRequster) request(responses chan *Response, request *Request) {
-	if rand.Intn(10000)-requester.state.inFlight < 0 {
+	if rand.Intn(10000)-int(requester.state.inFlight) < 0 {
 		responses <- &Response{request, 0, errors.New("Bad response")}
 		return
 	}
@@ -81,7 +82,7 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 func getPayload(fullData []byte) []byte {
 	if config.maxBodySize != 0 {
 		randomSize := rand.Int63n(int64(config.maxBodySize - config.minBodySize))
-		return fullData[0: int64(config.minBodySize)+randomSize]
+		return fullData[0 : int64(config.minBodySize)+randomSize]
 	} else {
 		return fullData
 	}
@@ -93,7 +94,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 		if err := recover(); err != nil { //catch
 			responses <- &Response{&Request{"BAD_URL", time.Now()}, time.Nanosecond,
 				fmt.Errorf("Error: %s", "panic")}
-				return
+			return
 		}
 	}()
 	for i := 0; i < 10 && req == nil; i++ {
@@ -123,7 +124,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	if err != nil {
 		responses <- &Response{request, timeSpent,
-			fmt.Errorf("Bad request: %s\n%s\n%s", err, resp.Header, resp.Body())}
+			fmt.Errorf("Bad request: %s\n%s\n%s", err, resp.Header.String(), resp.Body())}
 		return
 	}
 
@@ -132,7 +133,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 		responses <- &Response{request, timeSpent, nil}
 	default:
 		responses <- &Response{request, timeSpent,
-			fmt.Errorf("Error: %s \n%s \n%s ", resp.StatusCode(), resp.Header, resp.Body())}
+			fmt.Errorf("Error: %d \n%s \n%s ", resp.StatusCode(), resp.Header.String(), resp.Body())}
 	}
 }
 
