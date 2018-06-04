@@ -144,7 +144,7 @@ const (
 //OPState contains state for OP(READ/WRITE)
 type OPState struct {
 	color            string
-	speed            int
+	concurrency      int
 	done             int64
 	errors           int64
 	inFlight         int32
@@ -268,7 +268,7 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 			results.Percentiles[s] = percentile(state.latencies, percentiles[i])
 		}
 		if config.mode == LowLatency {
-			results.FinalSpeed = state.speed
+			results.FinalSpeed = state.concurrency
 		}
 
 		from := successful - 10
@@ -449,8 +449,8 @@ func makeLoad() {
 		writes: newOPState(WRITE, "blue"),
 		reads:  newOPState(READ, "green"),
 	}
-	progress.reads.speed = config.readThreads
-	progress.writes.speed = config.writeThreads
+	progress.reads.concurrency = config.readThreads
+	progress.writes.concurrency = config.writeThreads
 	operators := getOperators(&progress)
 
 	go displayProgress(progress.writes)

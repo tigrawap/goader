@@ -8,20 +8,20 @@ import (
 type threadedEmitter struct{}
 
 func (emitter *threadedEmitter) emitRequests(state *OPState) {
-	if state.speed <= 0 {
+	if state.concurrency <= 0 {
 		return
 	}
 	var inFlight int32
 	state.inFlightCallback = make(chan int32, 1000)
 MAINLOOP:
 	for {
-		if inFlight >= int32(state.speed) {
+		if inFlight >= int32(state.concurrency) {
 		FOR:
 			for {
 				select {
 				case inFlight = <-state.inFlightCallback:
 				default:
-					if inFlight >= int32(state.speed) {
+					if inFlight >= int32(state.concurrency) {
 						inFlight = <-state.inFlightCallback
 						continue MAINLOOP
 					}
