@@ -12,14 +12,6 @@ type nullAdjuster struct {
 func (adjuster *nullAdjuster) adjust(response *Response) {
 }
 
-type latencyAdjuster struct {
-	movingCount     int
-	movingTotalTime time.Duration
-	movingAvgTime   time.Duration
-	state           *OPState
-	barrier         int
-}
-
 type boundAdjuster struct {
 	boundTo *int
 	boundBy *int
@@ -37,8 +29,19 @@ func (a *boundAdjuster) adjust(response *Response) {
 const arrowUp = `↗`
 const arrowDown = `↘`
 
+type latencyAdjuster struct {
+	movingCount            int
+	movingTotalTime        time.Duration
+	movingAvgTime          time.Duration
+	state                  *OPState
+	barrier                int
+	errorTolerationPercent float64
+	errorRequestCount      int
+	errorCount             int
+}
+
 func newLatencyAdjuster(state *OPState) *latencyAdjuster {
-	a := latencyAdjuster{state: state}
+	a := latencyAdjuster{state: state, errorTolerationPercent: 3}
 	return &a
 }
 
@@ -69,6 +72,11 @@ func (a *latencyAdjuster) setBarrier(barrier int) {
 
 func (a *latencyAdjuster) adjust(response *Response) {
 	a.movingCount++
+	a.errorTotalCount++
+	if a.errorRequestCount > int(a.errorTolerationPercent)*100 { // resetting window
+		a.errorRequestCount = int(a.errorTolerationPercent) * 33 // keeping correct moving window is more expensive, raw estimate is good enough
+		a.errorCount = a.errorCount / 3
+	}
 	barrierPenalty := (a.state.concurrency + 1) - a.barrier
 	sample := int(math.Log(float64(a.state.concurrency)) * logbase)
 	if barrierPenalty > 0 && a.barrier > 0 {
@@ -76,11 +84,18 @@ func (a *latencyAdjuster) adjust(response *Response) {
 	}
 
 	if response.err != nil {
-		if a.barrier > a.state.concurrency || a.barrier == 0 {
-			a.setBarrier(a.state.concurrency)
+		a.errorCount++
+		if float64(a.errorCount)/float64(a.errorTotalCount)*100 > a.errorTolerationPercent {
+			a.errorTotalCount = 0
+			a.errorCount = 0
+			if a.barrier > a.state.concurrency || a.barrier == 0 {
+				a.setBarrier(a.state.concurrency)
+			}
+			a.decrease()
+			return
+		} else {
+			a.movingTotalTime += config.maxLatency // Not downscaling, but treating error as max latency
 		}
-		a.decrease()
-		return
 	} else {
 		a.movingTotalTime += response.latency
 	}
