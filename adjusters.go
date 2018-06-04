@@ -82,7 +82,7 @@ func (a *latencyAdjuster) adjust(response *Response) {
 				a.state.speed++
 				if a.barrier != 0 {
 					if a.state.speed - a.barrier > 3 {
-						a.barrier = a.state.speed - 2
+						a.barrier++
 					}
 				}
 				a.movingCount = 0
