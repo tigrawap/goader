@@ -72,12 +72,19 @@ func (a *latencyAdjuster) adjust(response *Response) {
 				p(a.state.colored(arrowDown))
 				if a.state.speed > 1 {
 					a.state.speed--
+					a.movingCount =0
+					a.movingTotalTime = 0
 				}
 			}
 		} else if a.movingAvgTime <= config.maxLatency/100*(100-thresholdPercent) {
 			if a.state.speed < config.maxChannels {
 				p(a.state.colored(arrowUp))
 				a.state.speed++
+				if a.barrier != 0 {
+					if a.state.speed - a.barrier > 3 {
+						a.barrier = a.state.speed - 2
+					}
+				}
 				a.movingCount = 0
 				a.movingTotalTime = 0
 			}

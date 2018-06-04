@@ -12,8 +12,8 @@ func (emitter *threadedEmitter) emitRequests(state *OPState) {
 		return
 	}
 	var inFlight int32
-	//MAINLOOP:
 	state.inFlightCallback = make(chan int32, 1000)
+MAINLOOP:
 	for {
 		if inFlight >= int32(state.speed) {
 		FOR:
@@ -21,6 +21,10 @@ func (emitter *threadedEmitter) emitRequests(state *OPState) {
 				select {
 				case inFlight = <-state.inFlightCallback:
 				default:
+					if inFlight >= int32(state.speed) {
+						inFlight = <-state.inFlightCallback
+						continue MAINLOOP
+					}
 					break FOR
 				}
 			}
