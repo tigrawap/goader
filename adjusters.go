@@ -72,7 +72,7 @@ func (a *latencyAdjuster) setBarrier(barrier int) {
 
 func (a *latencyAdjuster) adjust(response *Response) {
 	a.movingCount++
-	a.errorTotalCount++
+	a.errorRequestCount++
 	if a.errorRequestCount > int(a.errorTolerationPercent)*100 { // resetting window
 		a.errorRequestCount = int(a.errorTolerationPercent) * 33 // keeping correct moving window is more expensive, raw estimate is good enough
 		a.errorCount = a.errorCount / 3
@@ -85,8 +85,8 @@ func (a *latencyAdjuster) adjust(response *Response) {
 
 	if response.err != nil {
 		a.errorCount++
-		if float64(a.errorCount)/float64(a.errorTotalCount)*100 > a.errorTolerationPercent {
-			a.errorTotalCount = 0
+		if float64(a.errorCount)/float64(a.errorRequestCount)*100 > a.errorTolerationPercent {
+			a.errorRequestCount = 0
 			a.errorCount = 0
 			if a.barrier > a.state.concurrency || a.barrier == 0 {
 				a.setBarrier(a.state.concurrency)
