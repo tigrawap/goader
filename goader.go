@@ -501,7 +501,15 @@ func makeLoad() {
 		go badRateAborter(progress.reads, &results.Reads, &config.rps, stoppedByRate)
 	}
 
+	//go func() {
+	//	<-time.After(1 * time.Minute)
+	//	buf := make([]byte, 1<<16)
+	//	runtime.Stack(buf, true)
+	//	fmt.Printf("%s", buf)
+	//	os.Exit(1)
+	//}()
 	<-mainDone
+
 	select {
 	case <-workersDone:
 	case <-time.After(5 * time.Second):

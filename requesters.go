@@ -52,6 +52,7 @@ func newSleepRequster(state *OPState) *sleepRequster {
 type httpRequester struct {
 	data   []byte
 	client fasthttp.Client
+	timeout time.Duration
 	method string
 	auther HTTPAuther
 	state  *OPState
@@ -75,6 +76,11 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 		randc.Read(requester.data)
 	} else {
 		requester.method = "GET"
+	}
+	if config.maxLatency == NotSet {
+		requester.timeout = 60 * time.Second
+	}else{
+		requester.timeout = 5 * config.maxLatency
 	}
 	return &requester
 }
@@ -118,7 +124,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 	start := time.Now()
-	err := requester.client.Do(req, resp)
+	err := requester.client.DoTimeout(req, resp, requester.timeout)
 	timeSpent := time.Since(start)
 	statusCode := resp.StatusCode()
 
