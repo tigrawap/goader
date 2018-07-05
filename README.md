@@ -24,16 +24,17 @@ While both this scenarios is good enough reason for this benchmark utility to ex
 
 ##### Request engines  
 `--requests-engine=`  
-- `disk` Writes/Reads to/from disk. Support for O\_DIRECT is planned  (default engine).
-- `null` Does nothing, useful for testing utility itself. At the moment reaches 700k requests per/sec
+- `disk` Writes/Reads to/from disk. Support for O\_DIRECT is planned  (default engine).  
+- `meta` Filesystem OPS against paths, supported right now: `write`, `truncate`, `unlink`, `setattr`, `stat`. Supports weighted distribution  
+- `null` Does nothing, useful for testing utility itself. At the moment reaches 700k requests per/sec  
 - `sleep` Requster. For testing, sleeps instead of making real requests,
- also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life 
-- `upload` Uploads (by PUT) and GET files
+ also has semaphore of 10 concurrent connections, this emulates database which is bottleneck in the test and often in real life   
+- `upload` or `http` Uploads (by PUT) and GET files  
 - `s3` See `--help` for s3 params(bucket,keys,endpoint).
 `-url` stands for object key(with usual templating support)
 must provide endpoint, see list here: http://docs.aws.amazon.com/general/latest/gr/rande.html
 or use endpoint of your custom object storage with s3 interface  
-- `http` Planned. Simple single variable method http tester. Planned to support url template or weighted urls files list   
+
 
 ##### URL Template
 - `--url` Defines url/file path template.
@@ -69,7 +70,9 @@ Combination of `-max-latency` and `-wt/-rt` will set initial threads count, usef
 - `-show-progress` Displays progress of test execution. Defaults to true
 - `-written-urls-dump` Path to dump written(or read in read-only mode) files, so then can rerun as reads job
 - `-mkdirs` Will create directories in case path not found on-write
-
+- `-fair-random` Enables fair random engine. I.e with min-max sizes of 1-100 bytes  1 request of 100 bytes and 100 requests of 1 byte will be emitted on average.
+- `-random-fair-buckets` Divides(lineary) sizes range to N buckets and fairly distributes between them according to their weight. So with 0-4MB and default of 1000 buckets smallest request will be of 0-4096 bytes and largest between 4092kib-4096kib
+- `-meta-ops` Ops to emit in `meta` engine. Supported: write, truncate, unlink, mknod, setattr, stat.  Can be specified multiple times or comma separated. Weight is supported with default of 1, i.e: `-meta-ops=write, truncate:2, setattr:15, unlink:10, mknod:3`
 
    
 ### Examples  

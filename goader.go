@@ -21,9 +21,11 @@ import (
 	"math/big"
 	"math/rand"
 
+	"errors"
 	"github.com/dustin/go-humanize"
 	"github.com/mgutz/ansi"
 	"log"
+	"strings"
 	"sync/atomic"
 )
 
@@ -50,6 +52,7 @@ const (
 	Http            = "http"
 	S3              = "s3"
 	Disk            = "disk"
+	Meta            = "meta"
 	Null            = "null"
 	NotSet          = -1
 	EmptyString     = ""
@@ -60,40 +63,45 @@ const (
 )
 
 var config struct {
-	url                string //url/pattern
-	urlsSourceFile     string //url/pattern
-	writtenUrlsDump    string
-	rps                int
-	wps                int
-	rpw                float64
-	writeThreads       int
-	readThreads        int
-	mkdirs             bool
-	maxChannels        int
-	verbose            bool
-	maxRequests        int64
-	bodySize           uint64
-	minBodySize        uint64
-	maxBodySize        uint64
-	bodySizeInput      string
-	minBodySizeInput   string
-	maxBodySizeInput   string
-	mode               string
-	engine             string
-	outputFormat       string
-	showProgress       bool
-	stopOnBadRate      bool
-	output             Output
-	syncSleep          time.Duration
-	maxLatency         time.Duration
-	S3ApiKey           string
-	S3Bucket           string
-	S3Endpoint         string
-	S3Region           string
-	S3SecretKey        string
-	S3SignatureVersion int
-	timelineFile       string
-	seed               int64
+	url                    string //url/pattern
+	urlsSourceFile         string //url/pattern
+	writtenUrlsDump        string
+	rps                    int
+	wps                    int
+	rpw                    float64
+	writeThreads           int
+	readThreads            int
+	mkdirs                 bool
+	maxChannels            int
+	verbose                bool
+	maxRequests            int64
+	bodySize               uint64
+	minBodySize            uint64
+	maxBodySize            uint64
+	bodySizeInput          string
+	minBodySizeInput       string
+	maxBodySizeInput       string
+	metaOps                metaOps
+	randomFairDistribution bool
+	randomFairBuckets      int64
+	fileOffsetLimitInput   string
+	fileOffsetLimit        uint64
+	mode                   string
+	engine                 string
+	outputFormat           string
+	showProgress           bool
+	stopOnBadRate          bool
+	output                 Output
+	syncSleep              time.Duration
+	maxLatency             time.Duration
+	S3ApiKey               string
+	S3Bucket               string
+	S3Endpoint             string
+	S3Region               string
+	S3SecretKey            string
+	S3SignatureVersion     int
+	timelineFile           string
+	seed                   int64
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -137,7 +145,7 @@ type op int
 
 //Operation type
 const (
-	READ  op = iota
+	READ op = iota
 	WRITE
 )
 
@@ -169,15 +177,22 @@ func newOPState(op op, color string) *OPState {
 	} else {
 		name = "read"
 	}
+	buffersLen := 1000
+	overrides := []int{config.maxChannels, config.writeThreads, config.readThreads}
+	for _, o := range overrides {
+		if o > buffersLen {
+			buffersLen = o
+		}
+	}
 	state := OPState{
 		op:        op,
 		name:      name,
 		color:     color,
 		goodUrls:  make([]string, 0, config.maxRequests),
 		colored:   ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
-		responses: make(chan *Response, 1000),
-		requests:  make(chan int, 1000),
-		progress:  make(chan bool, 1000),
+		responses: make(chan *Response, buffersLen),
+		requests:  make(chan int, buffersLen),
+		progress:  make(chan bool, buffersLen),
 	}
 	return &state
 }
@@ -352,6 +367,9 @@ func getOperators(progress *Progress) *Operators {
 	case Disk:
 		operators.writeRequster = newDiskRequester(progress.writes)
 		operators.readRequester = newDiskRequester(progress.reads)
+	case Meta:
+		operators.writeRequster = newMetaRequester(progress.writes)
+		operators.readRequester = newMetaRequester(progress.reads)
 	case Null:
 		operators.writeRequster = &nullRequester{}
 		operators.readRequester = &nullRequester{}
@@ -522,7 +540,7 @@ func makeLoad() {
 	config.output.printResults(&results)
 }
 
-func validateParams() {
+func setParams() {
 	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
 		println("OP/s and Threads flags are exclusive")
 		os.Exit(3)
@@ -549,17 +567,15 @@ func validateParams() {
 		println("Must specify s3 endpoint in s3 mode")
 		os.Exit(3)
 	}
-	isSetMin := config.minBodySize != 0
+	if config.randomFairDistribution {
+		getPayload = newEvenPayload()
+	}
+	//isSetMin := config.minBodySize != 0
 	isSetMax := config.maxBodySize != 0
-	if isSetMin || isSetMax {
-		if !(isSetMin && isSetMax) {
-			println("Should set both min/max body size")
+	if isSetMax {
+		if config.minBodySize > config.maxBodySize {
+			println("Min body size should be less than max body size")
 			os.Exit(3)
-		} else {
-			if config.minBodySize > config.maxBodySize {
-				println("Min body size should be less than max body size")
-				os.Exit(3)
-			}
 		}
 	}
 }
@@ -588,6 +604,12 @@ func configureMode() {
 		if config.readThreads == NotSet {
 			config.readThreads = 1
 		}
+	case Meta:
+		if len(config.metaOps) == 0 {
+			for _, op := range allMetaOps {
+				config.metaOps = append(config.metaOps, metaOp{string(op), 1})
+			}
+		}
 	default:
 		config.syncSleep = 1000 * time.Nanosecond
 	}
@@ -605,6 +627,42 @@ func selectPrinter() {
 	}
 }
 
+type metaOp struct {
+	op     string
+	weight int
+}
+type metaOps []metaOp
+
+// String is the method to format the flag's value, part of the flag.Value interface.
+// The String method's output will be used in diagnostics.
+func (m *metaOps) String() string {
+	return fmt.Sprint(*m)
+}
+
+func (m *metaOps) Set(value string) error {
+	for _, weightedOp := range strings.Split(value, ",") {
+		parts := strings.Split(weightedOp, ":")
+		op := parts[0]
+		weight := 1
+		var err error
+		switch len(parts) {
+		case 0:
+			log.Panicln()
+			return errors.New(fmt.Sprintln("OP cannot be empty string"))
+		case 1:
+		case 2:
+			weight, err = strconv.Atoi(parts[1])
+			if err != nil {
+				return errors.New(fmt.Sprintln("Could not parse weight of ", op))
+			}
+		default:
+			log.Panicln("Could not parse meta ops, multiple ':' specified")
+		}
+		*m = append(*m, metaOp{op, weight})
+	}
+	return nil
+}
+
 func configure() {
 	flag.IntVar(&config.rps, "rps", NotSet, "Reads per second")
 	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
@@ -612,10 +670,12 @@ func configure() {
 	flag.IntVar(&config.readThreads, "rt", NotSet, "Read threads")
 	flag.Float64Var(&config.rpw, "rpw", NotSetFloat64, "Reads per write")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
+	flag.Int64Var(&config.randomFairBuckets, "random-fair-buckets", 1000, "Buckets for fair distribution, more buckets add precision, but increase cpu overhead.")
 	flag.IntVar(&config.maxChannels, "max-channels", 32, "Maximum threads")
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
-	flag.StringVar(&config.maxBodySizeInput, "max-body-size", EmptyString, "Maximum body size for put requests (will randomize)")
-	flag.StringVar(&config.minBodySizeInput, "min-body-size", EmptyString, "Minimal body size for put requests (will randomize)")
+	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
+	flag.StringVar(&config.minBodySizeInput, "min-body-size", NotSetString, "Minimal body size for put requests (will randomize)")
+	flag.BoolVar(&config.randomFairDistribution, "fair-random", false, "Will produce fair distribution of body sizes, i.e with size 1-100 will produce ~100 requests of 1 byte and 1 requests of 100 bytes")
 	flag.StringVar(&config.engine, "requests-engine", Disk, "s3/sleep/upload/http")
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
 		"Max latency to allow when searching for maximum thread count")
@@ -635,6 +695,8 @@ func configure() {
 	flag.BoolVar(&config.mkdirs, "mkdirs", false, "mkdir missing dirs on-write")
 	flag.BoolVar(&config.verbose, "verbose", false, "Verbose output on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", EmptyString, "Path to timeline.html (visual representation of progress)")
+	flag.Var(&config.metaOps, "meta-ops", "Comma-separated list of meta ops, can specify weight with :int, i.e write:3,unlink:1")
+	flag.StringVar(&config.fileOffsetLimitInput, "meta-offset-limit", "16MiB", "Limit of offset for writes/truncate")
 	flag.Int64Var(&config.seed, "seed", NotSet, "Seed to use in random generator")
 	flag.Parse()
 	var err error
@@ -642,17 +704,21 @@ func configure() {
 	if config.url == EmptyString && flag.NArg() == 1 {
 		config.url = flag.Args()[0]
 	}
-	if config.minBodySizeInput != EmptyString {
+	if config.minBodySizeInput != NotSetString {
 		config.minBodySize, err = humanize.ParseBytes(config.minBodySizeInput)
 	}
-	if config.maxBodySizeInput != EmptyString {
+	if config.maxBodySizeInput != NotSetString {
 		config.maxBodySize, err = humanize.ParseBytes(config.maxBodySizeInput)
 		config.bodySize = config.maxBodySize
 	}
+	if config.fileOffsetLimitInput != NotSetString {
+		config.fileOffsetLimit, err = humanize.ParseBytes(config.fileOffsetLimitInput)
+	}
+
 	if err != nil {
 		fmt.Println(err.Error())
 	}
-	validateParams()
+	setParams()
 	selectMode()
 	selectPrinter()
 	configureMode()

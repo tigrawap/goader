@@ -9,7 +9,9 @@ import (
 
 	"io/ioutil"
 
+	"github.com/tigrawap/goader/utils"
 	"github.com/valyala/fasthttp"
+	"io"
 	"log"
 	"os"
 	"path"
@@ -50,12 +52,12 @@ func newSleepRequster(state *OPState) *sleepRequster {
 }
 
 type httpRequester struct {
-	data   []byte
-	client fasthttp.Client
+	data    []byte
+	client  fasthttp.Client
 	timeout time.Duration
-	method string
-	auther HTTPAuther
-	state  *OPState
+	method  string
+	auther  HTTPAuther
+	state   *OPState
 }
 
 func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
@@ -79,20 +81,38 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 	}
 	if config.maxLatency == NotSet {
 		requester.timeout = 60 * time.Second
-	}else{
+	} else {
 		requester.timeout = 5 * config.maxLatency
 	}
 	return &requester
 }
 
-func getPayload(fullData []byte) []byte {
+func getPayloadRandom(fullData []byte) []byte {
 	if config.maxBodySize != 0 {
 		randomSize := rand.Int63n(int64(config.maxBodySize - config.minBodySize))
-		return fullData[0 : int64(config.minBodySize)+randomSize]
+		return fullData[0: int64(config.minBodySize)+randomSize]
 	} else {
 		return fullData
 	}
 }
+
+func newEvenPayload() payloadGetter {
+	if config.maxBodySize == 0 {
+		return func(fullData []byte) []byte {
+			return fullData
+		}
+	}
+
+	roller := utils.NewWeightedRoller(int64(config.minBodySize), int64(config.maxBodySize), config.randomFairBuckets)
+	f := func(fullData []byte) []byte {
+		return fullData[0:roller.Roll()]
+	}
+	return f
+}
+
+type payloadGetter func(fullData []byte) []byte
+
+var getPayload = getPayloadRandom
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
 	var req *fasthttp.Request
@@ -181,4 +201,89 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 		_, err = ioutil.ReadFile(filename)
 	}
 	responses <- &Response{request, time.Since(start), err}
+}
+
+type metaOpRequst string
+
+const (
+	opUnlink   metaOpRequst = "unlink"
+	opTruncate              = "truncate"
+	opMknod                 = "mknod"
+	opWrite                 = "write"
+	opStat                  = "stat"
+	opSetattr               = "setattr"
+)
+
+var allMetaOps = []metaOpRequst{
+	opUnlink, opTruncate, opMknod, opWrite, opStat, opSetattr,
+}
+
+type metaRequester struct {
+	state *OPState
+	data  []byte
+	ops   []metaOpRequst
+	opLen int //pre-calculated ops len
+}
+
+func (r *metaRequester) request(responses chan *Response, request *Request) {
+	r.doRequest(responses, request, false)
+}
+
+func (r *metaRequester) doRequest(responses chan *Response, request *Request, isRetry bool) {
+	filename := request.url
+	var err error
+	start := time.Now()
+	op := r.ops[rand.Intn(r.opLen)]
+	switch op {
+	case opWrite:
+		if fd, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+			fd.Seek(rand.Int63n(int64(config.fileOffsetLimit)), io.SeekStart)
+			fd.Write(getPayload(r.data))
+			fd.Close() // TODO: Defer and reuse FD
+		}
+	case opSetattr:
+		err = os.Chown(filename, rand.Int(), rand.Int())
+	case opTruncate:
+		err = os.Truncate(filename, rand.Int63n(int64(config.fileOffsetLimit)))
+	case opUnlink:
+		err = os.Remove(filename)
+	case opStat:
+		_, err = os.Stat(filename)
+	case opMknod:
+		err = mknod(filename)
+	default:
+		log.Panicln("Unknown IO")
+	}
+	if os.IsNotExist(err) && config.mkdirs {
+		err = os.MkdirAll(path.Dir(filename), 0755)
+		if !isRetry {
+			r.doRequest(responses, request, true)
+			return
+		}
+	}
+	responses <- &Response{request, time.Since(start), err}
+}
+
+func newMetaRequester(state *OPState) *metaRequester {
+	r := metaRequester{
+		state: state,
+	}
+	if state.op == WRITE {
+		r.data = make([]byte, config.bodySize)
+		randc.Read(r.data)
+	}
+
+	for _, op := range config.metaOps {
+		metaOp := metaOpRequst(op.op)
+		switch metaOp {
+		case opSetattr, opStat, opWrite, opUnlink, opTruncate, opMknod:
+			for i := 0; i < op.weight; i++ {
+				r.ops = append(r.ops, metaOp)
+			}
+		default:
+			log.Panicln("Unknown meta op ", op.op)
+		}
+	}
+	r.opLen = len(r.ops)
+	return &r
 }
