@@ -210,12 +210,13 @@ const (
 	opTruncate              = "truncate"
 	opMknod                 = "mknod"
 	opWrite                 = "write"
+	opRead                  = "read"
 	opStat                  = "stat"
 	opSetattr               = "setattr"
 )
 
 var allMetaOps = []metaOpRequst{
-	opUnlink, opTruncate, opMknod, opWrite, opStat, opSetattr,
+	opUnlink, opTruncate, opMknod, opWrite, opRead, opStat, opSetattr,
 }
 
 type metaRequester struct {
@@ -235,10 +236,21 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 	start := time.Now()
 	op := r.ops[rand.Intn(r.opLen)]
 	switch op {
-	case opWrite:
-		if fd, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+	case opWrite, opRead:
+		var fd *os.File
+		var flags int
+		if op == opWrite {
+			flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		}else{
+			flags = os.O_RDONLY
+		}
+		if fd, err = os.OpenFile(filename, flags, 0644); err == nil {
 			fd.Seek(rand.Int63n(int64(config.fileOffsetLimit)), io.SeekStart)
-			fd.Write(getPayload(r.data))
+			if op == opWrite {
+				fd.Write(getPayload(r.data))
+			} else {
+				fd.Read(make([]byte, len(getPayload(r.data)))) // TODO: Refactor random poller to stand-alone entity
+			}
 			fd.Close() // TODO: Defer and reuse FD
 		}
 	case opSetattr:
@@ -276,7 +288,7 @@ func newMetaRequester(state *OPState) *metaRequester {
 	for _, op := range config.metaOps {
 		metaOp := metaOpRequst(op.op)
 		switch metaOp {
-		case opSetattr, opStat, opWrite, opUnlink, opTruncate, opMknod:
+		case opSetattr, opStat, opWrite, opUnlink, opTruncate, opMknod, opRead:
 			for i := 0; i < op.weight; i++ {
 				r.ops = append(r.ops, metaOp)
 			}

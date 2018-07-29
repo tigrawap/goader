@@ -91,6 +91,7 @@ var config struct {
 	outputFormat           string
 	showProgress           bool
 	stopOnBadRate          bool
+	adjustOnErrors         bool
 	output                 Output
 	syncSleep              time.Duration
 	maxLatency             time.Duration
@@ -145,7 +146,7 @@ type op int
 
 //Operation type
 const (
-	READ op = iota
+	READ  op = iota
 	WRITE
 )
 
@@ -694,6 +695,7 @@ func configure() {
 	flag.BoolVar(&config.stopOnBadRate, "stop-on-bad-rate", false, "Stops benchmark if cant maintain rate")
 	flag.BoolVar(&config.mkdirs, "mkdirs", false, "mkdir missing dirs on-write")
 	flag.BoolVar(&config.verbose, "verbose", false, "Verbose output on errors")
+	flag.BoolVar(&config.adjustOnErrors, "adjust-on-errors", true, "Adjust concurrency in max-latency mode on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", EmptyString, "Path to timeline.html (visual representation of progress)")
 	flag.Var(&config.metaOps, "meta-ops", "Comma-separated list of meta ops, can specify weight with :int, i.e write:3,unlink:1")
 	flag.StringVar(&config.fileOffsetLimitInput, "meta-offset-limit", "16MiB", "Limit of offset for writes/truncate")
