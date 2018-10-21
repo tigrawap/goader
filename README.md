@@ -72,7 +72,7 @@ Combination of `-max-latency` and `-wt/-rt` will set initial threads count, usef
 - `-mkdirs` Will create directories in case path not found on-write
 - `-fair-random` Enables fair random engine. I.e with min-max sizes of 1-100 bytes  1 request of 100 bytes and 100 requests of 1 byte will be emitted on average.
 - `-random-fair-buckets` Divides(lineary) sizes range to N buckets and fairly distributes between them according to their weight. So with 0-4MB and default of 1000 buckets smallest request will be of 0-4096 bytes and largest between 4092kib-4096kib
-- `-meta-ops` Ops to emit in `meta` engine. Supported: write, truncate, unlink, mknod, setattr, stat.  Can be specified multiple times or comma separated. Weight is supported with default of 1, i.e: `-meta-ops=write,truncate:2,setattr:15,unlink:10,mknod:3`
+- `-meta-ops` Ops to emit in `meta` engine. Supported: write, truncate, unlink, mknod, setattr, stat, symlink, hardlink, rename.  Can be specified multiple times or comma separated. Weight is supported with default of 1, i.e: `-meta-ops=write,truncate:2,setattr:15,unlink:10,mknod:3`
 
    
 ### Examples  
