@@ -31,8 +31,16 @@ import (
 
 //Request struct
 type Request struct {
-	url       string
+	targeter       Target
+	url string
 	startTime time.Time
+}
+
+func (r *Request) getUrl() string{
+	if r.url == "" {
+		r.url = r.targeter.get()
+	}
+	return r.url
 }
 
 //Response struct
@@ -134,7 +142,7 @@ func startWorker(progress *Progress, state *OPState, targeter Target, requester 
 			return
 		case <-state.requests:
 			if !(atomic.AddInt64(&progress.totalRequests, 1) > config.maxRequests) {
-				requester.request(state.responses, &Request{targeter.get(), time.Now()})
+				requester.request(state.responses, &Request{targeter:targeter, startTime:time.Now()})
 			} else {
 				return
 			}
@@ -232,7 +240,7 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 			if response.err == nil {
 				state.totalTime += response.latency
 				state.slicesLock.Lock()
-				state.goodUrls = append(state.goodUrls, response.request.url)
+				state.goodUrls = append(state.goodUrls, response.request.getUrl())
 				state.latencies = append(state.latencies, response.latency)
 				state.slicesLock.Unlock()
 			} else {

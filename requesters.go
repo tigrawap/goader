@@ -26,7 +26,6 @@ type sleepRequster struct {
 }
 
 func (n *nullRequester) request(responses chan *Response, request *Request) {
-	fmt.Fprint(ioutil.Discard, request.url)
 	responses <- &Response{request, time.Nanosecond, nil}
 }
 
@@ -118,7 +117,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 	var req *fasthttp.Request
 	defer func() {
 		if err := recover(); err != nil { //catch
-			responses <- &Response{&Request{"BAD_URL", time.Now()}, time.Nanosecond,
+			responses <- &Response{&Request{targeter:&BadUrlTarget{}, startTime:time.Now()}, time.Nanosecond,
 				fmt.Errorf("Error: %s", "panic")}
 			return
 		}
@@ -133,7 +132,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 		log.Fatalln("Could not acquire request object from fasthttp pool after 10 retries")
 	}
 	defer fasthttp.ReleaseRequest(req)
-	req.SetRequestURI(request.url)
+	req.SetRequestURI(request.getUrl())
 
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
@@ -184,7 +183,7 @@ func (requester *diskRequester) request(responses chan *Response, request *Reque
 }
 
 func (requester *diskRequester) doRequest(responses chan *Response, request *Request, isRetry bool) {
-	filename := request.url
+	filename := request.getUrl()
 
 	var err error
 	start := time.Now()
@@ -213,10 +212,13 @@ const (
 	opRead                  = "read"
 	opStat                  = "stat"
 	opSetattr               = "setattr"
+	opSymlink               = "symlink"
+	opHardLink              = "hardlink"
+	opRename              = "rename"
 )
 
 var allMetaOps = []metaOpRequst{
-	opUnlink, opTruncate, opMknod, opWrite, opRead, opStat, opSetattr,
+	opUnlink, opTruncate, opMknod, opWrite, opRead, opStat, opSetattr, opSymlink, opHardLink, opRename,
 }
 
 type metaRequester struct {
@@ -230,8 +232,9 @@ func (r *metaRequester) request(responses chan *Response, request *Request) {
 	r.doRequest(responses, request, false)
 }
 
+
 func (r *metaRequester) doRequest(responses chan *Response, request *Request, isRetry bool) {
-	filename := request.url
+	filename := request.getUrl()
 	var err error
 	start := time.Now()
 	op := r.ops[rand.Intn(r.opLen)]
@@ -263,6 +266,14 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 		_, err = os.Stat(filename)
 	case opMknod:
 		err = mknod(filename)
+	case opSymlink:
+		os.Remove(request.getUrl())
+		err = os.Symlink(utils.GetAbsolute(request.targeter.get()), request.getUrl())
+	case opHardLink:
+		os.Remove(request.getUrl())
+		err = os.Link(utils.GetAbsolute(request.targeter.get()), request.getUrl())
+	case opRename:
+		err = os.Rename(request.getUrl(), utils.GetAbsolute(request.targeter.get()))
 	default:
 		log.Panicln("Unknown IO")
 	}
@@ -288,7 +299,7 @@ func newMetaRequester(state *OPState) *metaRequester {
 	for _, op := range config.metaOps {
 		metaOp := metaOpRequst(op.op)
 		switch metaOp {
-		case opSetattr, opStat, opWrite, opUnlink, opTruncate, opMknod, opRead:
+		case opSetattr, opStat, opWrite, opUnlink, opTruncate, opMknod, opRead, opSymlink, opHardLink, opRename:
 			for i := 0; i < op.weight; i++ {
 				r.ops = append(r.ops, metaOp)
 			}
