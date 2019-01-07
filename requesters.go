@@ -243,7 +243,7 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 		var fd *os.File
 		var flags int
 		if op == opWrite {
-			flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+			flags = os.O_WRONLY | os.O_CREATE
 		}else{
 			flags = os.O_RDONLY
 		}
