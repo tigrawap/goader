@@ -2,8 +2,11 @@
 
 package main
 
-import "syscall"
+import (
+	"syscall"
+)
 
 func mknod(filename string) error{
 	return syscall.Mknod(filename, 0666, 0)
 }
+

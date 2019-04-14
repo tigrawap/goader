@@ -4,7 +4,7 @@ import (
 	"math/rand"
 )
 
-type weightedRoller struct {
+type WeightedRoller struct {
 	start         int64
 	end           int64
 	sortedWeights []int64
@@ -13,7 +13,7 @@ type weightedRoller struct {
 	totalWeight   int64
 }
 
-func (r *weightedRoller) Roll() int64 {
+func (r *WeightedRoller) Roll() int64 {
 	roll := rand.Int63n(r.totalWeight)
 	var i int
 	for i = 0; i < len(r.sortedWeights); i++ { // TODO: Worth bisecting instead
@@ -31,14 +31,14 @@ func (r *weightedRoller) Roll() int64 {
 	return start + rand.Int63n(rollDistance)
 }
 
-func NewWeightedRoller(minSize int64, maxSize int64, numBuckets int64) *weightedRoller {
+func NewWeightedRoller(minSize int64, maxSize int64, numBuckets int64) *WeightedRoller {
 	if maxSize-minSize < numBuckets {
 		numBuckets = maxSize - minSize + 1
 	}
 	precisionMultiplier := numBuckets
 	var i int64
 
-	roller := weightedRoller{
+	roller := WeightedRoller{
 		start: minSize,
 		end:   maxSize,
 		step:  (maxSize - minSize) / numBuckets,

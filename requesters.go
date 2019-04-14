@@ -1,10 +1,11 @@
 package main
 
 import (
-	randc "crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/tigrawap/goader/ops"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"io/ioutil"
@@ -15,6 +16,7 @@ import (
 	"log"
 	"os"
 	"path"
+	randc "crypto/rand"
 )
 
 type nullRequester struct {
@@ -51,7 +53,6 @@ func newSleepRequster(state *OPState) *sleepRequster {
 }
 
 type httpRequester struct {
-	data    []byte
 	client  fasthttp.Client
 	timeout time.Duration
 	method  string
@@ -67,14 +68,6 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 	requester.state = state
 	if state.op == WRITE {
 		requester.method = "PUT"
-		var maxSize uint64
-		if config.maxBodySize != 0 {
-			maxSize = config.maxBodySize
-		} else {
-			maxSize = config.bodySize
-		}
-		requester.data = make([]byte, maxSize)
-		randc.Read(requester.data)
 	} else {
 		requester.method = "GET"
 	}
@@ -86,39 +79,17 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 	return &requester
 }
 
-func getPayloadRandom(fullData []byte) []byte {
-	if config.maxBodySize != 0 {
-		randomSize := rand.Int63n(int64(config.maxBodySize - config.minBodySize))
-		return fullData[0: int64(config.minBodySize)+randomSize]
-	} else {
-		return fullData
-	}
+var requestersConfig struct {
+	payloadGetter PayloadGetter
+	fullData      []byte
 }
-
-func newEvenPayload() payloadGetter {
-	if config.maxBodySize == 0 {
-		return func(fullData []byte) []byte {
-			return fullData
-		}
-	}
-
-	roller := utils.NewWeightedRoller(int64(config.minBodySize), int64(config.maxBodySize), config.randomFairBuckets)
-	f := func(fullData []byte) []byte {
-		return fullData[0:roller.Roll()]
-	}
-	return f
-}
-
-type payloadGetter func(fullData []byte) []byte
-
-var getPayload = getPayloadRandom
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
 	var req *fasthttp.Request
 	defer func() {
 		if err := recover(); err != nil { //catch
-			responses <- &Response{&Request{targeter:&BadUrlTarget{}, startTime:time.Now()}, time.Nanosecond,
-				fmt.Errorf("Error: %s", "panic")}
+			responses <- &Response{&Request{targeter: &BadUrlTarget{}, startTime: time.Now()}, time.Nanosecond,
+				fmt.Errorf("Error: %s,%v", "panic:", err)}
 			return
 		}
 	}()
@@ -136,8 +107,8 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
-	if requester.data != nil {
-		req.SetBody(getPayload(requester.data))
+	if requester.method == "POST"{
+		req.SetBody(requestersConfig.payloadGetter.Get())
 	}
 	requester.auther.sign(req)
 	resp := fasthttp.AcquireResponse()
@@ -164,16 +135,11 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 type diskRequester struct {
 	state *OPState
-	data  []byte
 }
 
 func newDiskRequester(state *OPState) *diskRequester {
 	r := diskRequester{
 		state: state,
-	}
-	if state.op == WRITE {
-		r.data = make([]byte, config.bodySize)
-		randc.Read(r.data)
 	}
 	return &r
 }
@@ -188,7 +154,7 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 	var err error
 	start := time.Now()
 	if requester.state.op == WRITE {
-		err = ioutil.WriteFile(filename, getPayload(requester.data), 0644)
+		err = ioutil.WriteFile(filename, requestersConfig.payloadGetter.Get(), 0644)
 		if os.IsNotExist(err) && config.mkdirs {
 			err = os.MkdirAll(path.Dir(filename), 0755)
 			if !isRetry {
@@ -205,33 +171,49 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 type metaOpRequst string
 
 const (
-	opUnlink   metaOpRequst = "unlink"
-	opTruncate              = "truncate"
-	opMknod                 = "mknod"
-	opWrite                 = "write"
-	opRead                  = "read"
-	opStat                  = "stat"
-	opSetattr               = "setattr"
-	opSymlink               = "symlink"
-	opHardLink              = "hardlink"
-	opRename              = "rename"
+	opUnlink    metaOpRequst = "unlink"
+	opTruncate               = "truncate"
+	opMknod                  = "mknod"
+	opWrite                  = "write"
+	opRead                   = "read"
+	opStat                   = "stat"
+	opSetattr                = "setattr"
+	opSymlink                = "symlink"
+	opHardLink               = "hardlink"
+	opRename                 = "rename"
+	opSetxattr               = "setxattr"
+	opGetxattr               = "getxattr"
+	opListxattr              = "listxattr"
+	opRemovexattr              = "removexattr"
 )
 
 var allMetaOps = []metaOpRequst{
-	opUnlink, opTruncate, opMknod, opWrite, opRead, opStat, opSetattr, opSymlink, opHardLink, opRename,
+	opUnlink,
+	opTruncate,
+	opMknod,
+	opWrite,
+	opRead,
+	opStat,
+	opSetattr,
+	opSymlink,
+	opHardLink,
+	opRename,
+	opSetxattr,
+	opGetxattr,
+	opRemovexattr,
 }
 
 type metaRequester struct {
-	state *OPState
-	data  []byte
-	ops   []metaOpRequst
-	opLen int //pre-calculated ops len
+	state           *OPState
+	ops             []metaOpRequst
+	opLen           int //pre-calculated ops len
+	xattrPayload    PayloadGetter
+	xattrReadBuffer PayloadGetter
 }
 
 func (r *metaRequester) request(responses chan *Response, request *Request) {
 	r.doRequest(responses, request, false)
 }
-
 
 func (r *metaRequester) doRequest(responses chan *Response, request *Request, isRetry bool) {
 	filename := request.getUrl()
@@ -244,15 +226,15 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 		var flags int
 		if op == opWrite {
 			flags = os.O_WRONLY | os.O_CREATE
-		}else{
+		} else {
 			flags = os.O_RDONLY
 		}
 		if fd, err = os.OpenFile(filename, flags, 0644); err == nil {
 			fd.Seek(rand.Int63n(int64(config.fileOffsetLimit)), io.SeekStart)
 			if op == opWrite {
-				fd.Write(getPayload(r.data))
+				fd.Write(requestersConfig.payloadGetter.Get())
 			} else {
-				fd.Read(make([]byte, len(getPayload(r.data)))) // TODO: Refactor random poller to stand-alone entity
+				fd.Read(make([]byte, requestersConfig.payloadGetter.GetLength())) // TODO: Refactor random poller to stand-alone entity
 			}
 			fd.Close() // TODO: Defer and reuse FD
 		}
@@ -264,6 +246,14 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 		err = os.Remove(filename)
 	case opStat:
 		_, err = os.Stat(filename)
+	case opSetxattr:
+		err = ops.Setxattr(filename, getXattrName(), r.xattrPayload.Get(), 0)
+	case opGetxattr:
+		_, err = ops.Getxattr(filename, getXattrName(), r.xattrReadBuffer.Get())
+	case opListxattr:
+		_, err = ops.Listxattr(filename, r.xattrReadBuffer.Get())
+	case opRemovexattr:
+		err = ops.Removexattr(filename, getXattrName())
 	case opMknod:
 		err = mknod(filename)
 	case opSymlink:
@@ -291,15 +281,17 @@ func newMetaRequester(state *OPState) *metaRequester {
 	r := metaRequester{
 		state: state,
 	}
-	if state.op == WRITE {
-		r.data = make([]byte, config.bodySize)
-		randc.Read(r.data)
-	}
+
+	xattrData := make([]byte, config.metaXattrLength)
+	randc.Read(xattrData)
+	xattrTrashData := make([]byte, config.metaXattrLength)
+	r.xattrPayload = newFairPayload(xattrData, 0, 100)
+	r.xattrReadBuffer = newFairPayload(xattrTrashData, 0, 30)
 
 	for _, op := range config.metaOps {
 		metaOp := metaOpRequst(op.op)
 		switch metaOp {
-		case opSetattr, opStat, opWrite, opUnlink, opTruncate, opMknod, opRead, opSymlink, opHardLink, opRename:
+		case opSetattr, opStat, opWrite, opUnlink, opTruncate, opMknod, opRead, opSymlink, opHardLink, opRename, opSetxattr, opGetxattr, opRemovexattr, opListxattr:
 			for i := 0; i < op.weight; i++ {
 				r.ops = append(r.ops, metaOp)
 			}
@@ -309,4 +301,8 @@ func newMetaRequester(state *OPState) *metaRequester {
 	}
 	r.opLen = len(r.ops)
 	return &r
+}
+
+func getXattrName() string {
+	return "user.goader.xattr-" + strconv.Itoa(rand.Intn(config.metaXattrKeys))
 }

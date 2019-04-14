@@ -31,12 +31,12 @@ import (
 
 //Request struct
 type Request struct {
-	targeter       Target
-	url string
+	targeter  Target
+	url       string
 	startTime time.Time
 }
 
-func (r *Request) getUrl() string{
+func (r *Request) getUrl() string {
 	if r.url == "" {
 		r.url = r.targeter.get()
 	}
@@ -90,8 +90,10 @@ var config struct {
 	minBodySizeInput       string
 	maxBodySizeInput       string
 	metaOps                metaOps
+	metaXattrKeys          int
+	metaXattrLength        int
 	randomFairDistribution bool
-	randomFairBuckets      int64
+	randomFairBuckets      int
 	fileOffsetLimitInput   string
 	fileOffsetLimit        uint64
 	mode                   string
@@ -142,7 +144,7 @@ func startWorker(progress *Progress, state *OPState, targeter Target, requester 
 			return
 		case <-state.requests:
 			if !(atomic.AddInt64(&progress.totalRequests, 1) > config.maxRequests) {
-				requester.request(state.responses, &Request{targeter:targeter, startTime:time.Now()})
+				requester.request(state.responses, &Request{targeter: targeter, startTime: time.Now()})
 			} else {
 				return
 			}
@@ -154,7 +156,7 @@ type op int
 
 //Operation type
 const (
-	READ  op = iota
+	READ op = iota
 	WRITE
 )
 
@@ -550,6 +552,8 @@ func makeLoad() {
 }
 
 func setParams() {
+	var err error
+
 	if (config.wps != NotSet || config.rps != NotSet) && (config.writeThreads != NotSet || config.readThreads != NotSet) {
 		println("OP/s and Threads flags are exclusive")
 		os.Exit(3)
@@ -576,10 +580,20 @@ func setParams() {
 		println("Must specify s3 endpoint in s3 mode")
 		os.Exit(3)
 	}
-	if config.randomFairDistribution {
-		getPayload = newEvenPayload()
-	}
 	//isSetMin := config.minBodySize != 0
+	if config.minBodySizeInput != NotSetString {
+		config.minBodySize, err = humanize.ParseBytes(config.minBodySizeInput)
+	}
+	if config.maxBodySizeInput != NotSetString {
+		config.maxBodySize, err = humanize.ParseBytes(config.maxBodySizeInput)
+	}
+	if config.fileOffsetLimitInput != NotSetString {
+		config.fileOffsetLimit, err = humanize.ParseBytes(config.fileOffsetLimitInput)
+	}
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
 	isSetMax := config.maxBodySize != 0
 	if isSetMax {
 		if config.minBodySize > config.maxBodySize {
@@ -672,6 +686,29 @@ func (m *metaOps) Set(value string) error {
 	return nil
 }
 
+func setRandomData() {
+	dataSize := config.bodySize
+	if config.maxBodySize != 0 {
+		dataSize = config.maxBodySize
+	}
+	fullData := make([]byte, dataSize)
+	randc.Read(fullData)
+	requestersConfig.fullData = fullData
+}
+
+func setPayloadGetter() {
+	fullData := requestersConfig.fullData
+	if config.maxBodySize == 0 {
+		requestersConfig.payloadGetter = newFullPayload(fullData)
+	} else {
+		if config.randomFairDistribution {
+			requestersConfig.payloadGetter = newFairPayload(fullData, int64(config.minBodySize), config.randomFairBuckets)
+		} else {
+			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize))
+		}
+	}
+}
+
 func configure() {
 	flag.IntVar(&config.rps, "rps", NotSet, "Reads per second")
 	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
@@ -679,7 +716,7 @@ func configure() {
 	flag.IntVar(&config.readThreads, "rt", NotSet, "Read threads")
 	flag.Float64Var(&config.rpw, "rpw", NotSetFloat64, "Reads per write")
 	flag.Int64Var(&config.maxRequests, "max-requests", 10000, "Maximum requests before stopping")
-	flag.Int64Var(&config.randomFairBuckets, "random-fair-buckets", 1000, "Buckets for fair distribution, more buckets add precision, but increase cpu overhead.")
+	flag.IntVar(&config.randomFairBuckets, "random-fair-buckets", 1000, "Buckets for fair distribution, more buckets add precision, but increase cpu overhead.")
 	flag.IntVar(&config.maxChannels, "max-channels", 32, "Maximum threads")
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
 	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
@@ -706,6 +743,8 @@ func configure() {
 	flag.BoolVar(&config.adjustOnErrors, "adjust-on-errors", true, "Adjust concurrency in max-latency mode on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", EmptyString, "Path to timeline.html (visual representation of progress)")
 	flag.Var(&config.metaOps, "meta-ops", "Comma-separated list of meta ops, can specify weight with :int, i.e write:3,unlink:1")
+	flag.IntVar(&config.metaXattrKeys, "meta-xattr-keys", 10, "Maximum number of xattr values in file")
+	flag.IntVar(&config.metaXattrLength, "meta-xattr-length", 5120, "Maximum length of xattrs, using weighed algorithm to distribute the sizes")
 	flag.StringVar(&config.fileOffsetLimitInput, "meta-offset-limit", "16MiB", "Limit of offset for writes/truncate")
 	flag.Int64Var(&config.seed, "seed", NotSet, "Seed to use in random generator")
 	flag.Parse()
@@ -714,21 +753,13 @@ func configure() {
 	if config.url == EmptyString && flag.NArg() == 1 {
 		config.url = flag.Args()[0]
 	}
-	if config.minBodySizeInput != NotSetString {
-		config.minBodySize, err = humanize.ParseBytes(config.minBodySizeInput)
-	}
-	if config.maxBodySizeInput != NotSetString {
-		config.maxBodySize, err = humanize.ParseBytes(config.maxBodySizeInput)
-		config.bodySize = config.maxBodySize
-	}
-	if config.fileOffsetLimitInput != NotSetString {
-		config.fileOffsetLimit, err = humanize.ParseBytes(config.fileOffsetLimitInput)
-	}
 
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	setParams()
+	setRandomData()
+	setPayloadGetter()
 	selectMode()
 	selectPrinter()
 	configureMode()

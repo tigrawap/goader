@@ -44,3 +44,9 @@ type Output interface {
 type S3Auther interface {
 	sign(r *fasthttp.Request)
 }
+
+type PayloadGetter interface {
+	Get() []byte
+	GetFull() []byte
+	GetLength() int64
+}
