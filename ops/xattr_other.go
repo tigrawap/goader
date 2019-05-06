@@ -1,4 +1,5 @@
-// +build darwin dragonfly freebsd nacl netbsd openbsd solaris windows
+// +build darwin freebsd netbsd openbsd windows
+
 package ops
 
 import (
