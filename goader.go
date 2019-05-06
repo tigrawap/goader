@@ -82,6 +82,7 @@ var config struct {
 	mkdirs                 bool
 	maxChannels            int
 	verbose                bool
+	memoryDebug                bool
 	maxRequests            int64
 	bodySize               uint64
 	minBodySize            uint64
@@ -199,11 +200,17 @@ func newOPState(op op, color string) *OPState {
 		op:        op,
 		name:      name,
 		color:     color,
-		goodUrls:  make([]string, 0, config.maxRequests),
+		latencies:  make(timeArray, 0, config.maxRequests),
 		colored:   ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
 		responses: make(chan *Response, buffersLen),
 		requests:  make(chan int, buffersLen),
 		progress:  make(chan bool, buffersLen),
+	}
+	if config.timelineFile != EmptyString {
+		state.timeline = make([]RequestTimes, 0, config.maxRequests)
+	}
+	if op == WRITE && config.readThreads != 0 && config.writeThreads != 0 {
+		state.goodUrls =  make([]string, 0, config.maxRequests)
 	}
 	return &state
 }
@@ -242,7 +249,9 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 			if response.err == nil {
 				state.totalTime += response.latency
 				state.slicesLock.Lock()
-				state.goodUrls = append(state.goodUrls, response.request.getUrl())
+				if state.op == WRITE && config.writeThreads != 0 && config.readThreads != 0{
+					state.goodUrls = append(state.goodUrls, response.request.getUrl())
+				}
 				state.latencies = append(state.latencies, response.latency)
 				state.slicesLock.Unlock()
 			} else {
@@ -251,11 +260,13 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 				}
 				state.errors++
 			}
-			state.timeline = append(state.timeline, RequestTimes{
-				Start:   response.request.startTime,
-				Latency: response.latency,
-				Success: response.err == nil,
-			})
+			if config.timelineFile != EmptyString {
+				state.timeline = append(state.timeline, RequestTimes{
+					Start:   response.request.startTime,
+					Latency: response.latency,
+					Success: response.err == nil,
+				})
+			}
 			adjuster.adjust(response)
 		}
 	}
@@ -709,6 +720,28 @@ func setPayloadGetter() {
 	}
 }
 
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
+}
+
+func startMemoryPrint(){
+	if !config.memoryDebug{
+		return
+	}
+	for {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+		var memoryInfo string
+		memoryInfo += fmt.Sprintf("Alloc = %v MiB", bToMb(m.Alloc))
+		memoryInfo += fmt.Sprintf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
+		memoryInfo += fmt.Sprintf("\tSys = %v MiB", bToMb(m.Sys))
+		memoryInfo += fmt.Sprintf("\tNumGC = %v\n", m.NumGC)
+		log.Println("Memory info", memoryInfo)
+		time.Sleep(5  * time.Second)
+	}
+}
+
 func configure() {
 	flag.IntVar(&config.rps, "rps", NotSet, "Reads per second")
 	flag.IntVar(&config.wps, "wps", NotSet, "Writes per second")
@@ -740,6 +773,7 @@ func configure() {
 	flag.BoolVar(&config.stopOnBadRate, "stop-on-bad-rate", false, "Stops benchmark if cant maintain rate")
 	flag.BoolVar(&config.mkdirs, "mkdirs", false, "mkdir missing dirs on-write")
 	flag.BoolVar(&config.verbose, "verbose", false, "Verbose output on errors")
+	flag.BoolVar(&config.memoryDebug, "memory-debug", false, "Print out memory usage information to stderr every 10 seconds")
 	flag.BoolVar(&config.adjustOnErrors, "adjust-on-errors", true, "Adjust concurrency in max-latency mode on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", EmptyString, "Path to timeline.html (visual representation of progress)")
 	flag.Var(&config.metaOps, "meta-ops", "Comma-separated list of meta ops, can specify weight with :int, i.e write:3,unlink:1")
@@ -778,5 +812,7 @@ func main() {
 	if maxprocs < 16 {
 		runtime.GOMAXPROCS(16)
 	}
+	go startMemoryPrint()
 	makeLoad()
 }
+
