@@ -82,7 +82,7 @@ var config struct {
 	mkdirs                 bool
 	maxChannels            int
 	verbose                bool
-	memoryDebug                bool
+	memoryDebug            bool
 	maxRequests            int64
 	bodySize               uint64
 	minBodySize            uint64
@@ -114,6 +114,7 @@ var config struct {
 	S3SignatureVersion     int
 	timelineFile           string
 	seed                   int64
+	writeGoodUrls          bool
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -200,7 +201,7 @@ func newOPState(op op, color string) *OPState {
 		op:        op,
 		name:      name,
 		color:     color,
-		latencies:  make(timeArray, 0, config.maxRequests),
+		latencies: make(timeArray, 0, config.maxRequests),
 		colored:   ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
 		responses: make(chan *Response, buffersLen),
 		requests:  make(chan int, buffersLen),
@@ -209,8 +210,8 @@ func newOPState(op op, color string) *OPState {
 	if config.timelineFile != EmptyString {
 		state.timeline = make([]RequestTimes, 0, config.maxRequests)
 	}
-	if op == WRITE && config.readThreads != 0 && config.writeThreads != 0 {
-		state.goodUrls =  make([]string, 0, config.maxRequests)
+	if op == WRITE && config.writeGoodUrls {
+		state.goodUrls = make([]string, 0, config.maxRequests)
 	}
 	return &state
 }
@@ -249,7 +250,7 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 			if response.err == nil {
 				state.totalTime += response.latency
 				state.slicesLock.Lock()
-				if state.op == WRITE && config.writeThreads != 0 && config.readThreads != 0{
+				if state.op == WRITE && config.writeGoodUrls {
 					state.goodUrls = append(state.goodUrls, response.request.getUrl())
 				}
 				state.latencies = append(state.latencies, response.latency)
@@ -558,7 +559,7 @@ func makeLoad() {
 	fillResults(&results.Writes, progress.writes, results.StartTime)
 	fillResults(&results.Reads, progress.reads, results.StartTime)
 	buildTimeline(progress.writes, progress.reads)
-	dumpWrittenUrls(progress.writes.goodUrls)
+	dumpWrittenUrls(progress.writes.goodUrls) // TODO: Consider writing in real time? So it won't be dependant on goodUrls store, which can be quite huge
 	config.output.printResults(&results)
 }
 
@@ -724,8 +725,8 @@ func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
 
-func startMemoryPrint(){
-	if !config.memoryDebug{
+func startMemoryPrint() {
+	if !config.memoryDebug {
 		return
 	}
 	for {
@@ -738,7 +739,7 @@ func startMemoryPrint(){
 		memoryInfo += fmt.Sprintf("\tSys = %v MiB", bToMb(m.Sys))
 		memoryInfo += fmt.Sprintf("\tNumGC = %v\n", m.NumGC)
 		log.Println("Memory info", memoryInfo)
-		time.Sleep(5  * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 }
 
@@ -797,6 +798,7 @@ func configure() {
 	selectMode()
 	selectPrinter()
 	configureMode()
+	configureGoodUrlsStore()
 	n, err := randc.Int(randc.Reader, big.NewInt(1<<63-1))
 	if config.seed == NotSet {
 		rand.Seed(n.Int64())
@@ -804,6 +806,12 @@ func configure() {
 		rand.Seed(config.seed)
 	}
 
+}
+
+func configureGoodUrlsStore() {
+	if (config.writeThreads != 0 && config.readThreads != 0) || config.writtenUrlsDump != EmptyString {
+		config.writeGoodUrls = true
+	}
 }
 
 func main() {
@@ -815,4 +823,3 @@ func main() {
 	go startMemoryPrint()
 	makeLoad()
 }
-
