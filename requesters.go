@@ -107,7 +107,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
-	if requester.method == "POST"{
+	if requester.method == "PUT" || requester.method == "POST" {
 		req.SetBody(requestersConfig.payloadGetter.Get())
 	}
 	requester.auther.sign(req)
