@@ -295,7 +295,7 @@ func percentile(numbers timeArray, n int) time.Duration {
 
 func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 	results.Percentiles = make(map[string]time.Duration)
-	successful := len(state.goodUrls)
+	successful := len(state.latencies)
 	if successful > 0 {
 		results.AverageSpeed = state.totalTime / time.Duration(successful)
 		sort.Sort(state.latencies)
