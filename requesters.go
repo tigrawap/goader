@@ -76,6 +76,7 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 	} else {
 		requester.timeout = 5 * config.maxLatency
 	}
+	requester.client.MaxConnsPerHost = config.maxChannels
 	return &requester
 }
 
