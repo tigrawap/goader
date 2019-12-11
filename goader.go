@@ -706,6 +706,7 @@ func setRandomData() {
 	fullData := make([]byte, dataSize)
 	randc.Read(fullData)
 	requestersConfig.fullData = fullData
+	requestersConfig.scratchData = make([]byte, dataSize)
 }
 
 func setPayloadGetter() {
@@ -719,6 +720,7 @@ func setPayloadGetter() {
 			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize))
 		}
 	}
+	requestersConfig.scratchBufferGetter = newScratchDataPayloadGetter(len(requestersConfig.fullData))
 }
 
 func bToMb(b uint64) uint64 {

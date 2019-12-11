@@ -193,7 +193,6 @@ type SourceFileTarget struct {
 	targets chan string
 }
 
-
 func (s *SourceFileTarget) get() string {
 	return <-s.targets
 }
@@ -264,6 +263,7 @@ func (b *BoundTarget) get() (ret string) {
 }
 
 type BadUrlTarget struct{}
+
 func (t *BadUrlTarget) get() string {
 	return "BAD_URL"
 }

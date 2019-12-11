@@ -10,13 +10,13 @@ import (
 
 	"io/ioutil"
 
+	randc "crypto/rand"
 	"github.com/tigrawap/goader/utils"
 	"github.com/valyala/fasthttp"
 	"io"
 	"log"
 	"os"
 	"path"
-	randc "crypto/rand"
 )
 
 type nullRequester struct {
@@ -81,8 +81,10 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 }
 
 var requestersConfig struct {
-	payloadGetter PayloadGetter
-	fullData      []byte
+	payloadGetter       PayloadGetter
+	scratchBufferGetter scratchDataPayloadGetter
+	fullData            []byte
+	scratchData         []byte
 }
 
 func (requester *httpRequester) request(responses chan *Response, request *Request) {
@@ -164,7 +166,13 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 			}
 		}
 	} else {
-		_, err = ioutil.ReadFile(filename)
+		if fd, err := os.OpenFile(filename, os.O_RDONLY, 0644); err == nil {
+			if fi, err := fd.Stat(); err == nil {
+				size := fi.Size()
+				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(size))
+				fd.Close()
+			}
+		}
 	}
 	responses <- &Response{request, time.Since(start), err}
 }
@@ -172,19 +180,19 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 type metaOpRequst string
 
 const (
-	opUnlink    metaOpRequst = "unlink"
-	opTruncate               = "truncate"
-	opMknod                  = "mknod"
-	opWrite                  = "write"
-	opRead                   = "read"
-	opStat                   = "stat"
-	opSetattr                = "setattr"
-	opSymlink                = "symlink"
-	opHardLink               = "hardlink"
-	opRename                 = "rename"
-	opSetxattr               = "setxattr"
-	opGetxattr               = "getxattr"
-	opListxattr              = "listxattr"
+	opUnlink      metaOpRequst = "unlink"
+	opTruncate                 = "truncate"
+	opMknod                    = "mknod"
+	opWrite                    = "write"
+	opRead                     = "read"
+	opStat                     = "stat"
+	opSetattr                  = "setattr"
+	opSymlink                  = "symlink"
+	opHardLink                 = "hardlink"
+	opRename                   = "rename"
+	opSetxattr                 = "setxattr"
+	opGetxattr                 = "getxattr"
+	opListxattr                = "listxattr"
 	opRemovexattr              = "removexattr"
 )
 
@@ -235,7 +243,7 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 			if op == opWrite {
 				fd.Write(requestersConfig.payloadGetter.Get())
 			} else {
-				fd.Read(make([]byte, requestersConfig.payloadGetter.GetLength())) // TODO: Refactor random poller to stand-alone entity
+				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(requestersConfig.payloadGetter.GetLength()))
 			}
 			fd.Close() // TODO: Defer and reuse FD
 		}

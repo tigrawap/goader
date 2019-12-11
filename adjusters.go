@@ -83,7 +83,7 @@ func (a *latencyAdjuster) adjust(response *Response) {
 		sample += a.state.concurrency * barrierPenalty
 	}
 
-	if config.adjustOnErrors && response.err != nil{
+	if config.adjustOnErrors && response.err != nil {
 		a.errorCount++
 		if float64(a.errorCount)/float64(a.errorRequestCount)*100 > a.errorTolerationPercent {
 			a.errorRequestCount = 0
