@@ -142,7 +142,8 @@ type Results struct {
 	StartTime time.Time
 }
 
-func startWorker(progress *Progress, state *OPState, targeter Target, requester Requester, quit chan bool) {
+func startWorker(progress *Progress, state *OPState, targeter Target, requester Requester, quit chan bool, w *sync.WaitGroup) {
+	defer w.Done()
 	for {
 		select {
 		case <-quit:
@@ -421,9 +422,20 @@ func quitOnInterrupt() chan bool {
 	c := make(chan os.Signal)
 	quit := make(chan bool)
 	signal.Notify(c, os.Interrupt)
-	signal.Notify(c, syscall.SIGTERM)
 	signal.Notify(c, syscall.SIGQUIT)
 	signal.Notify(c, syscall.SIGABRT)
+	go func() {
+		<-c
+		quit <- true
+	}()
+	return quit
+}
+
+func quitOnInterruptGracefully() chan bool {
+	c := make(chan os.Signal)
+	quit := make(chan bool)
+	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGTERM)
 	signal.Notify(c, syscall.SIGINT)
 	go func() {
 		<-c
@@ -489,6 +501,7 @@ func badRateAborter(state *OPState, result *OPResults, rate *int, stop chan bool
 
 func makeLoad() {
 	interrupted := quitOnInterrupt()
+	gracefullyInterrupted := quitOnInterruptGracefully()
 	stopWorkers := make(chan bool)
 	progress := Progress{
 		writes: newOPState(WRITE, "blue"),
@@ -506,15 +519,24 @@ func makeLoad() {
 	mainDone := make(chan bool)
 	workersDone := make(chan bool)
 	stoppedByRate := make(chan bool)
-	w := &sync.WaitGroup{}
-	w.Add(2)
+	responseWait := &sync.WaitGroup{}
+	responseWait.Add(2)
+
+	workersWait := &sync.WaitGroup{}
+	workersWait.Add(config.maxChannels * 2)
+
+	forceExit := false
 	go func() {
 	FOR_LOOP:
 		for {
 			select {
 			case <-interrupted:
-				results.report("Stopped by user")
+				forceExit = true
+				results.report("Aborted by user")
 				break FOR_LOOP
+			case <-gracefullyInterrupted:
+				results.report("Stopped by user")
+				break
 			case <-stoppedByRate:
 				results.reportError("Could not sustain given rate")
 				break FOR_LOOP
@@ -528,7 +550,10 @@ func makeLoad() {
 		}
 		close(stopWorkers)
 		mainDone <- true
-		w.Wait()
+		if !forceExit {
+			workersWait.Wait() // Letting IOs finish. In case of SIGABRT it will not wait.
+		}
+		responseWait.Wait()
 		workersDone <- true
 	}()
 
@@ -536,11 +561,11 @@ func makeLoad() {
 	go operators.readEmitter.emitRequests(progress.reads)
 
 	for i := 0; i < config.maxChannels; i++ {
-		go startWorker(&progress, progress.reads, operators.readTarget, operators.readRequester, stopWorkers)
-		go startWorker(&progress, progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers)
+		go startWorker(&progress, progress.reads, operators.readTarget, operators.readRequester, stopWorkers, workersWait)
+		go startWorker(&progress, progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers, workersWait)
 	}
-	go processResponses(progress.writes, &results, operators.writeAdjuster, w, stopWorkers)
-	go processResponses(progress.reads, &results, operators.readAdjuster, w, stopWorkers)
+	go processResponses(progress.writes, &results, operators.writeAdjuster, responseWait, stopWorkers)
+	go processResponses(progress.reads, &results, operators.readAdjuster, responseWait, stopWorkers)
 	if config.mode == ConstantRatio {
 		go badRateAborter(progress.writes, &results.Writes, &config.wps, stoppedByRate)
 		go badRateAborter(progress.reads, &results.Reads, &config.rps, stoppedByRate)
@@ -557,7 +582,7 @@ func makeLoad() {
 
 	select {
 	case <-workersDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(60 * time.Second):
 		config.output.report("Workers close timed out")
 	}
 	fillResults(&results.Writes, progress.writes, results.StartTime)
