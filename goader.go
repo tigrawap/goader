@@ -434,7 +434,6 @@ func quitOnInterrupt() chan bool {
 func quitOnInterruptGracefully() chan bool {
 	c := make(chan os.Signal)
 	quit := make(chan bool)
-	signal.Notify(c, os.Interrupt)
 	signal.Notify(c, syscall.SIGTERM)
 	signal.Notify(c, syscall.SIGINT)
 	go func() {
@@ -536,7 +535,7 @@ func makeLoad() {
 				break FOR_LOOP
 			case <-gracefullyInterrupted:
 				results.report("Stopped by user")
-				break
+				break FOR_LOOP
 			case <-stoppedByRate:
 				results.reportError("Could not sustain given rate")
 				break FOR_LOOP
@@ -545,7 +544,7 @@ func makeLoad() {
 			}
 			if progress.reads.getDone()+progress.writes.getDone() >= config.maxRequests {
 				results.report("Maximum requests count")
-				break
+				break FOR_LOOP
 			}
 		}
 		close(stopWorkers)
@@ -580,9 +579,13 @@ func makeLoad() {
 	//}()
 	<-mainDone
 
+	interrupted = quitOnInterrupt()
+	gracefullyInterrupted = quitOnInterruptGracefully()
 	select {
 	case <-workersDone:
-	case <-time.After(60 * time.Second):
+	case <-interrupted:
+	case <-gracefullyInterrupted:
+	case <-time.After(10 * time.Minute):
 		config.output.report("Workers close timed out")
 	}
 	fillResults(&results.Writes, progress.writes, results.StartTime)
