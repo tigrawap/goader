@@ -68,6 +68,8 @@ const (
 	NotSetFloat64   = -1.0
 	FormatHuman     = "human"
 	FormatJSON      = "json"
+	HttpsScheme     = "https"
+	HttpScheme      = "http"
 )
 
 var config struct {
@@ -109,6 +111,7 @@ var config struct {
 	S3ApiKey               string
 	S3Bucket               string
 	S3Endpoint             string
+	S3HttpScheme           string
 	S3Region               string
 	S3SecretKey            string
 	S3SignatureVersion     int
@@ -374,10 +377,11 @@ func getOperators(progress *Progress) *Operators {
 		operators.readRequester = newHTTPRequester(progress.reads, &nullAuther{})
 	case S3:
 		s3params := s3Params{
-			secretKey: config.S3SecretKey,
-			apiKey:    config.S3ApiKey,
-			bucket:    config.S3Bucket,
-			endpoint:  config.S3Endpoint,
+			secretKey:  config.S3SecretKey,
+			apiKey:     config.S3ApiKey,
+			bucket:     config.S3Bucket,
+			endpoint:   config.S3Endpoint,
+			httpScheme: config.S3HttpScheme,
 		}
 		var s3Auther S3Auther
 		if config.S3SignatureVersion == 4 {
@@ -592,6 +596,18 @@ func setParams() {
 		println("Must specify s3 endpoint in s3 mode")
 		os.Exit(3)
 	}
+
+	if config.engine == S3 && strings.HasPrefix(config.S3Endpoint, "http://") {
+		config.S3Endpoint = strings.Replace(config.S3Endpoint, "http://", "", 1)
+	}
+	if config.engine == S3 && strings.HasPrefix(config.S3Endpoint, "https://") {
+		config.S3Endpoint = strings.Replace(config.S3Endpoint, "https://", "", 1)
+		config.S3HttpScheme = HttpsScheme
+	}
+	if config.engine == S3 && config.S3HttpScheme == "" {
+		config.S3HttpScheme = HttpScheme
+	}
+
 	//isSetMin := config.minBodySize != 0
 	if config.minBodySizeInput != NotSetString {
 		config.minBodySize, err = humanize.ParseBytes(config.minBodySizeInput)
