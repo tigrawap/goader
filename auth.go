@@ -22,10 +22,11 @@ func (a *nullAuther) sign(r *fasthttp.Request) {
 }
 
 type s3Params struct {
-	secretKey string
-	apiKey    string
-	bucket    string
-	endpoint  string
+	secretKey  string
+	apiKey     string
+	bucket     string
+	endpoint   string
+	httpScheme string
 }
 
 type s3AutherV2 struct {
@@ -66,7 +67,7 @@ func (a *s3AutherV4) sign(r *fasthttp.Request) {
 	dateFull := date.Format("20060102T150405Z")
 	dateDate := date.Format("20060102")
 	bucketKey := fmt.Sprintf("%s/%s", a.bucket, r.RequestURI())
-	r.SetRequestURI(fmt.Sprintf("http://%s/%s", a.endpoint, bucketKey))
+	r.SetRequestURI(fmt.Sprintf("%s://%s/%s", a.httpScheme, a.endpoint, bucketKey))
 	r.Header.Set("x-amz-date", dateFull)
 	r.Header.Set("Content-Type", "text/html")
 	if config.S3ApiKey == EmptyString && config.S3SecretKey == EmptyString {
@@ -108,7 +109,7 @@ func (a *s3AutherV2) sign(r *fasthttp.Request) {
 	// and this is must be done for implementing s3 V4 auth support
 	date := time.Now().UTC().Format(time.RFC1123)
 	bucketKey := fmt.Sprintf("%s/%s", a.bucket, r.RequestURI())
-	r.SetRequestURI(fmt.Sprintf("http://%s/%s", a.endpoint, bucketKey))
+	r.SetRequestURI(fmt.Sprintf("%s://%s/%s", a.httpScheme, a.endpoint, bucketKey))
 	r.Header.Set("Date", date)
 	r.Header.Set("Content-Type", "text/html")
 
