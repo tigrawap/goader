@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"net/http"
 	"os"
@@ -15,6 +16,8 @@ var (
 )
 
 func initMetrics() {
+	metrics := allMetaOps
+	metrics = append(metrics, "sleep", "null")
 	for _, op := range allMetaOps {
 		counterVec := prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "goader_" + string(op) + "_ops",
@@ -59,6 +62,36 @@ func dumpMetrics() {
 	}
 
 	for _, m := range metrics {
+		skip := true
+		for _, metric := range m.Metric {
+			switch *m.Type {
+			case io_prometheus_client.MetricType_COUNTER:
+				if metric.Counter.GetValue() != 0 {
+					skip = false
+				}
+			case io_prometheus_client.MetricType_GAUGE:
+				if metric.Gauge.GetValue() != 0 {
+					skip = false
+				}
+			case io_prometheus_client.MetricType_HISTOGRAM:
+				if metric.Histogram.GetSampleCount() != 0 {
+					skip = false
+				}
+			case io_prometheus_client.MetricType_SUMMARY:
+				if metric.Summary.GetSampleCount() != 0 {
+					skip = false
+				}
+			case io_prometheus_client.MetricType_UNTYPED:
+				if metric.Untyped.GetValue() != 0 {
+					skip = false
+				}
+			}
+		}
+
+		if skip {
+			continue
+		}
+
 		encoder := expfmt.NewEncoder(os.Stdout, expfmt.FmtText)
 		err := encoder.Encode(m)
 		if err != nil {
