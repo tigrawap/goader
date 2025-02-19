@@ -9,13 +9,13 @@ import (
 	"github.com/mgutz/ansi"
 )
 
-//HumanOutput will represent results in human form
+// HumanOutput will represent results in human form
 type HumanOutput struct {
 	pb   chan string
 	quit chan bool
 }
 
-//JSONOutput will represent results in json form
+// JSONOutput will represent results in json form
 type JSONOutput struct{}
 
 func newHumanOutput() *HumanOutput {

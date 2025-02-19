@@ -29,7 +29,7 @@ import (
 	"sync/atomic"
 )
 
-//Request struct
+// Request struct
 type Request struct {
 	targeter  Target
 	url       string
@@ -43,14 +43,14 @@ func (r *Request) getUrl() string {
 	return r.url
 }
 
-//Response struct
+// Response struct
 type Response struct {
 	request *Request
 	latency time.Duration
 	err     error
 }
 
-//Various constants to avoid typos
+// Various constants to avoid typos
 const (
 	LowLatency      = "low-latency"
 	ConstantRatio   = "constant"
@@ -73,54 +73,56 @@ const (
 )
 
 var config struct {
-	url                    string //url/pattern
-	urlsSourceFile         string //url/pattern
-	writtenUrlsDump        string
-	rps                    int
-	wps                    int
-	rpw                    float64
-	writeThreads           int
-	readThreads            int
-	mkdirs                 bool
-	maxChannels            int
-	verbose                bool
-	memoryDebug            bool
-	maxRequests            int64
-	bodySize               uint64
-	minBodySize            uint64
-	maxBodySize            uint64
-	bodySizeInput          string
-	minBodySizeInput       string
-	maxBodySizeInput       string
-	metaOps                metaOps
-	metaXattrKeys          int
-	metaXattrLength        int
-	randomFairDistribution bool
-	randomFairBuckets      int
-	fileOffsetLimitInput   string
-	fileOffsetLimit        uint64
-	mode                   string
-	engine                 string
-	outputFormat           string
-	showProgress           bool
-	stopOnBadRate          bool
-	adjustOnErrors         bool
-	output                 Output
-	syncSleep              time.Duration
-	maxLatency             time.Duration
-	S3ApiKey               string
-	S3Bucket               string
-	S3Endpoint             string
-	S3HttpScheme           string
-	S3Region               string
-	S3SecretKey            string
-	S3SignatureVersion     int
-	timelineFile           string
-	seed                   int64
-	writeGoodUrls          bool
+	url                     string //url/pattern
+	urlsSourceFile          string //url/pattern
+	writtenUrlsDump         string
+	rps                     int
+	wps                     int
+	rpw                     float64
+	writeThreads            int
+	readThreads             int
+	mkdirs                  bool
+	maxChannels             int
+	verbose                 bool
+	memoryDebug             bool
+	maxRequests             int64
+	bodySize                uint64
+	minBodySize             uint64
+	maxBodySize             uint64
+	bodySizeInput           string
+	minBodySizeInput        string
+	maxBodySizeInput        string
+	bodySizeGranularity     int64
+	metaOps                 metaOps
+	metaXattrKeys           int
+	metaXattrLength         int
+	randomFairDistribution  bool
+	randomFairBuckets       int
+	fileOffsetLimitInput    string
+	fileOffsetLimit         uint64
+	mode                    string
+	engine                  string
+	outputFormat            string
+	showProgress            bool
+	stopOnBadRate           bool
+	adjustOnErrors          bool
+	output                  Output
+	syncSleep               time.Duration
+	maxLatency              time.Duration
+	S3ApiKey                string
+	S3Bucket                string
+	S3Endpoint              string
+	S3HttpScheme            string
+	S3Region                string
+	S3SecretKey             string
+	S3SignatureVersion      int
+	timelineFile            string
+	seed                    int64
+	writeGoodUrls           bool
+	enablePrometheusMetrics bool
 }
 
-//OPResults result of specific operation, lately can be printed by different outputters
+// OPResults result of specific operation, lately can be printed by different outputters
 type OPResults struct {
 	Errors         int64
 	Done           int64
@@ -133,7 +135,7 @@ type OPResults struct {
 	StaggeredFor   time.Duration
 }
 
-//Results of benchmark execution, represents final output, marshalled directly into json in json output mode
+// Results of benchmark execution, represents final output, marshalled directly into json in json output mode
 type Results struct {
 	Writes    OPResults
 	Reads     OPResults
@@ -160,13 +162,13 @@ func startWorker(progress *Progress, state *OPState, targeter Target, requester 
 
 type op int
 
-//Operation type
+// Operation type
 const (
 	READ op = iota
 	WRITE
 )
 
-//OPState contains state for OP(READ/WRITE)
+// OPState contains state for OP(READ/WRITE)
 type OPState struct {
 	color            string
 	concurrency      int
@@ -326,7 +328,7 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 	results.AverageGoodOps = int64(float64((state.getDone()-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
 }
 
-//Operators chosen by config
+// Operators chosen by config
 type Operators struct {
 	readEmitter   Emitter
 	writeEmitter  Emitter
@@ -447,7 +449,7 @@ func p(s string) {
 	config.output.progress(s)
 }
 
-//TODO: Don't really like this global variables, methods on result, global config. Need to rethink
+// TODO: Don't really like this global variables, methods on result, global config. Need to rethink
 func (r *Results) reportError(s string) {
 	r.Errors = append(r.Errors, s)
 	config.output.reportError(s)
@@ -761,7 +763,7 @@ func setPayloadGetter() {
 		if config.randomFairDistribution {
 			requestersConfig.payloadGetter = newFairPayload(fullData, int64(config.minBodySize), config.randomFairBuckets)
 		} else {
-			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize))
+			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize), int64(config.bodySizeGranularity))
 		}
 	}
 	requestersConfig.scratchBufferGetter = newScratchDataPayloadGetter(len(requestersConfig.fullData))
@@ -801,6 +803,7 @@ func configure() {
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
 	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
 	flag.StringVar(&config.minBodySizeInput, "min-body-size", NotSetString, "Minimal body size for put requests (will randomize)")
+	flag.Int64Var(&config.bodySizeGranularity, "body-size-granularity", 1, "Granularity of body size, i.e 4096 will randomize body size adjusted to 4096 bytes")
 	flag.BoolVar(&config.randomFairDistribution, "fair-random", false, "Will produce fair distribution of body sizes, i.e with size 1-100 will produce ~100 requests of 1 byte and 1 requests of 100 bytes")
 	flag.StringVar(&config.engine, "requests-engine", Disk, "s3/sleep/upload/http")
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
