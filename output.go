@@ -120,3 +120,18 @@ func (o *JSONOutput) report(s string) {
 
 func (o *JSONOutput) reportError(s string) {
 }
+
+type PrometheusOutput struct{}
+
+func (p *PrometheusOutput) progress(s string) {
+}
+
+func (p *PrometheusOutput) reportError(s string) {
+}
+
+func (p *PrometheusOutput) report(s string) {
+}
+
+func (p *PrometheusOutput) printResults(result *Results) {
+	dumpMetrics()
+}

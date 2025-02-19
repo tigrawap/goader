@@ -53,24 +53,25 @@ type Response struct {
 
 // Various constants to avoid typos
 const (
-	LowLatency      = "low-latency"
-	ConstantRatio   = "constant"
-	ConstantThreads = "constant-threads"
-	Sleep           = "sleep"
-	Upload          = "upload"
-	Http            = "http"
-	S3              = "s3"
-	Disk            = "disk"
-	Meta            = "meta"
-	Null            = "null"
-	NotSet          = -1
-	EmptyString     = ""
-	NotSetString    = "_GOADER_NOT_SET_"
-	NotSetFloat64   = -1.0
-	FormatHuman     = "human"
-	FormatJSON      = "json"
-	HttpsScheme     = "https"
-	HttpScheme      = "http"
+	LowLatency       = "low-latency"
+	ConstantRatio    = "constant"
+	ConstantThreads  = "constant-threads"
+	Sleep            = "sleep"
+	Upload           = "upload"
+	Http             = "http"
+	S3               = "s3"
+	Disk             = "disk"
+	Meta             = "meta"
+	Null             = "null"
+	NotSet           = -1
+	EmptyString      = ""
+	NotSetString     = "_GOADER_NOT_SET_"
+	NotSetFloat64    = -1.0
+	FormatHuman      = "human"
+	FormatJSON       = "json"
+	FormatPrometheus = "prometheus"
+	HttpsScheme      = "https"
+	HttpScheme       = "http"
 )
 
 var config struct {
@@ -274,6 +275,18 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 					Latency: response.latency,
 					Success: response.err == nil,
 				})
+			}
+			if config.enablePrometheusMetrics {
+				if counter, ok := OpCounters[state.name]; ok {
+					if response.err == nil {
+						counter.WithLabelValues("success", strconv.FormatInt(response.payloadSize, 10)).Inc()
+					} else {
+						counter.WithLabelValues("error", strconv.FormatInt(response.payloadSize, 10)).Inc()
+					}
+				}
+				if hist, ok := OpDurations[state.name]; ok {
+					hist.Observe(float64(response.latency.Nanoseconds()))
+				}
 			}
 			adjuster.adjust(response)
 		}
@@ -703,6 +716,9 @@ func selectPrinter() {
 		config.output = newHumanOutput()
 	case FormatJSON:
 		config.output = &JSONOutput{}
+	case FormatPrometheus:
+		config.output = &PrometheusOutput{}
+		config.enablePrometheusMetrics = true
 	default:
 		fmt.Println("Unknown output format")
 		os.Exit(2)
@@ -832,17 +848,22 @@ func configure() {
 	flag.IntVar(&config.metaXattrLength, "meta-xattr-length", 5120, "Maximum length of xattrs, using weighed algorithm to distribute the sizes")
 	flag.StringVar(&config.fileOffsetLimitInput, "meta-offset-limit", "16MiB", "Limit of offset for writes/truncate")
 	flag.Int64Var(&config.seed, "seed", NotSet, "Seed to use in random generator")
+	flag.BoolVar(&config.enablePrometheusMetrics, "enable-prometheus-metrics", false, "Enable prometheus metrics endpoint, for long runs in Kubernetes")
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
 	if config.url == EmptyString && flag.NArg() == 1 {
 		config.url = flag.Args()[0]
 	}
+	if config.outputFormat == FormatPrometheus {
+		config.enablePrometheusMetrics = true
+	}
 
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	setParams()
+	setMetrics()
 	setRandomData()
 	setPayloadGetter()
 	selectMode()
