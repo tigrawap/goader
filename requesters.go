@@ -22,7 +22,7 @@ import (
 type nullRequester struct {
 }
 
-type sleepRequster struct {
+type sleepRequester struct {
 	state *OPState
 	db    chan int
 }
@@ -31,7 +31,7 @@ func (n *nullRequester) request(responses chan *Response, request *Request) {
 	responses <- &Response{request, time.Nanosecond * time.Duration(rand.Intn(1000000)), 0, nil}
 }
 
-func (requester *sleepRequster) request(responses chan *Response, request *Request) {
+func (requester *sleepRequester) request(responses chan *Response, request *Request) {
 	if rand.Intn(10000)-int(requester.state.inFlight) < 0 {
 		responses <- &Response{request, 0, 0, errors.New("Bad response")}
 		return
@@ -44,8 +44,8 @@ func (requester *sleepRequster) request(responses chan *Response, request *Reque
 	responses <- &Response{request, time.Since(start), 0, nil}
 }
 
-func newSleepRequster(state *OPState) *sleepRequster {
-	r := sleepRequster{
+func newSleepRequster(state *OPState) *sleepRequester {
+	r := sleepRequester{
 		state: state,
 		db:    make(chan int, 10),
 	}
