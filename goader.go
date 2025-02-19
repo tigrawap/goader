@@ -53,25 +53,26 @@ type Response struct {
 
 // Various constants to avoid typos
 const (
-	LowLatency       = "low-latency"
-	ConstantRatio    = "constant"
-	ConstantThreads  = "constant-threads"
-	Sleep            = "sleep"
-	Upload           = "upload"
-	Http             = "http"
-	S3               = "s3"
-	Disk             = "disk"
-	Meta             = "meta"
-	Null             = "null"
-	NotSet           = -1
-	EmptyString      = ""
-	NotSetString     = "_GOADER_NOT_SET_"
-	NotSetFloat64    = -1.0
-	FormatHuman      = "human"
-	FormatJSON       = "json"
-	FormatPrometheus = "prometheus"
-	HttpsScheme      = "https"
-	HttpScheme       = "http"
+	LowLatency                       = "low-latency"
+	ConstantRatio                    = "constant"
+	ConstantThreads                  = "constant-threads"
+	Sleep                            = "sleep"
+	Upload                           = "upload"
+	Http                             = "http"
+	S3                               = "s3"
+	Disk                             = "disk"
+	Meta                             = "meta"
+	Null                             = "null"
+	NotSet                           = -1
+	EmptyString                      = ""
+	NotSetString                     = "_GOADER_NOT_SET_"
+	NotSetFloat64                    = -1.0
+	FormatHuman                      = "human"
+	FormatJSON                       = "json"
+	FormatPrometheus                 = "prometheus"
+	HttpsScheme                      = "https"
+	HttpScheme                       = "http"
+	MaxGoodInMemUrlsForIndefiniteRun = 1000000 // only used if numRequests = -1
 )
 
 var config struct {
@@ -259,27 +260,6 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 		case response = <-state.responses:
 			state.opDone()
 			state.progress <- response.err == nil
-			if response.err == nil {
-				state.totalTime += response.latency
-				state.slicesLock.Lock()
-				if state.op == WRITE && config.writeGoodUrls {
-					state.goodUrls = append(state.goodUrls, response.request.getUrl())
-				}
-				state.latencies = append(state.latencies, response.latency)
-				state.slicesLock.Unlock()
-			} else {
-				if config.verbose {
-					results.reportError(response.err.Error())
-				}
-				state.errors++
-			}
-			if config.timelineFile != EmptyString {
-				state.timeline = append(state.timeline, RequestTimes{
-					Start:   response.request.startTime,
-					Latency: response.latency,
-					Success: response.err == nil,
-				})
-			}
 			if config.enablePrometheusMetrics {
 				if counter, ok := OpCounters[state.name]; ok {
 					if response.err == nil {
@@ -291,6 +271,30 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 				if hist, ok := OpDurations[state.name]; ok {
 					hist.Observe(float64(response.latency.Nanoseconds()))
 				}
+			} else {
+				if response.err == nil {
+					state.totalTime += response.latency
+					state.slicesLock.Lock()
+					state.latencies = append(state.latencies, response.latency)
+					state.slicesLock.Unlock()
+				} else {
+					if config.verbose {
+						results.reportError(response.err.Error())
+					}
+					state.errors++
+				}
+			}
+
+			if response.err == nil && state.op == WRITE && config.writeGoodUrls && (config.maxRequests > 0 || len(state.goodUrls) < MaxGoodInMemUrlsForIndefiniteRun) {
+				state.goodUrls = append(state.goodUrls, response.request.getUrl())
+			}
+
+			if config.timelineFile != EmptyString {
+				state.timeline = append(state.timeline, RequestTimes{
+					Start:   response.request.startTime,
+					Latency: response.latency,
+					Success: response.err == nil,
+				})
 			}
 			adjuster.adjust(response)
 		}
