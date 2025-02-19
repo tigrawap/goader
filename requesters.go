@@ -175,6 +175,7 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 		if fd, err := os.OpenFile(filename, os.O_RDONLY, 0644); err == nil {
 			if fi, err := fd.Stat(); err == nil {
 				size := fi.Size()
+				payloadSize = size
 				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(size))
 				fd.Close()
 			}
@@ -235,6 +236,7 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 	var err error
 	start := time.Now()
 	op := r.ops[rand.Intn(r.opLen)]
+	var payloadSize int64 = 0
 	switch op {
 	case opWrite, opRead:
 		var fd *os.File
@@ -247,9 +249,12 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 		if fd, err = os.OpenFile(filename, flags, 0644); err == nil {
 			fd.Seek(rand.Int63n(int64(config.fileOffsetLimit)), io.SeekStart)
 			if op == opWrite {
-				fd.Write(requestersConfig.payloadGetter.Get())
+				payload := requestersConfig.payloadGetter.Get()
+				payloadSize = int64(len(payload))
+				fd.Write(payload)
 			} else {
-				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(requestersConfig.payloadGetter.GetLength()))
+				payloadSize = requestersConfig.payloadGetter.GetLength()
+				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(payloadSize))
 			}
 			fd.Close() // TODO: Defer and reuse FD
 		}
@@ -289,7 +294,7 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 			return
 		}
 	}
-	responses <- &Response{request, time.Since(start), 0, err}
+	responses <- &Response{request, time.Since(start), payloadSize, err}
 }
 
 func newMetaRequester(state *OPState) *metaRequester {
