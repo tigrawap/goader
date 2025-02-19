@@ -28,12 +28,12 @@ type sleepRequster struct {
 }
 
 func (n *nullRequester) request(responses chan *Response, request *Request) {
-	responses <- &Response{request, time.Nanosecond, nil}
+	responses <- &Response{request, time.Nanosecond * time.Duration(rand.Intn(1000000)), 0, nil}
 }
 
 func (requester *sleepRequster) request(responses chan *Response, request *Request) {
 	if rand.Intn(10000)-int(requester.state.inFlight) < 0 {
-		responses <- &Response{request, 0, errors.New("Bad response")}
+		responses <- &Response{request, 0, 0, errors.New("Bad response")}
 		return
 	}
 	start := time.Now()
@@ -41,7 +41,7 @@ func (requester *sleepRequster) request(responses chan *Response, request *Reque
 	var timeToSleep = time.Duration(rand.Intn(200)) * time.Millisecond
 	time.Sleep(timeToSleep)
 	<-requester.db
-	responses <- &Response{request, time.Since(start), nil}
+	responses <- &Response{request, time.Since(start), 0, nil}
 }
 
 func newSleepRequster(state *OPState) *sleepRequster {
@@ -92,7 +92,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 	defer func() {
 		if err := recover(); err != nil { //catch
 			responses <- &Response{&Request{targeter: &BadUrlTarget{}, startTime: time.Now()}, time.Nanosecond,
-				fmt.Errorf("Error: %s,%v", "panic:", err)}
+				0, fmt.Errorf("Error: %s,%v", "panic:", err)}
 			return
 		}
 	}()
@@ -110,8 +110,11 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
+	var payloadSize int64 = 0
 	if requester.method == "PUT" || requester.method == "POST" {
-		req.SetBody(requestersConfig.payloadGetter.Get())
+		body := requestersConfig.payloadGetter.Get()
+		payloadSize = int64(len(body))
+		req.SetBody(body)
 	}
 	requester.auther.sign(req)
 	resp := fasthttp.AcquireResponse()
@@ -123,15 +126,15 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	if err != nil {
 		responses <- &Response{request, timeSpent,
-			fmt.Errorf("Bad request: %s\n%s\n%s", err, resp.Header.String(), resp.Body())}
+			payloadSize, fmt.Errorf("Bad request: %s\n%s\n%s", err, resp.Header.String(), resp.Body())}
 		return
 	}
 
 	switch statusCode {
 	case fasthttp.StatusOK, fasthttp.StatusCreated:
-		responses <- &Response{request, timeSpent, nil}
+		responses <- &Response{request, timeSpent, payloadSize, nil}
 	default:
-		responses <- &Response{request, timeSpent,
+		responses <- &Response{request, timeSpent, payloadSize,
 			fmt.Errorf("Error: %d \n%s \n%s ", resp.StatusCode(), resp.Header.String(), resp.Body())}
 	}
 }
@@ -155,9 +158,12 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 	filename := request.getUrl()
 
 	var err error
+	var payloadSize int64 = 0
 	start := time.Now()
 	if requester.state.op == WRITE {
-		err = ioutil.WriteFile(filename, requestersConfig.payloadGetter.Get(), 0644)
+		payload := requestersConfig.payloadGetter.Get()
+		payloadSize = int64(len(payload))
+		err = ioutil.WriteFile(filename, payload, 0644)
 		if os.IsNotExist(err) && config.mkdirs {
 			err = os.MkdirAll(path.Dir(filename), 0755)
 			if !isRetry {
@@ -174,7 +180,7 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 			}
 		}
 	}
-	responses <- &Response{request, time.Since(start), err}
+	responses <- &Response{request, time.Since(start), payloadSize, err}
 }
 
 type metaOpRequst string
@@ -283,7 +289,7 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 			return
 		}
 	}
-	responses <- &Response{request, time.Since(start), err}
+	responses <- &Response{request, time.Since(start), 0, err}
 }
 
 func newMetaRequester(state *OPState) *metaRequester {

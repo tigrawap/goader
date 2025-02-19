@@ -45,9 +45,10 @@ func (r *Request) getUrl() string {
 
 // Response struct
 type Response struct {
-	request *Request
-	latency time.Duration
-	err     error
+	request     *Request
+	latency     time.Duration
+	payloadSize int64
+	err         error
 }
 
 // Various constants to avoid typos
