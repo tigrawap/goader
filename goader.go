@@ -155,7 +155,10 @@ func startWorker(progress *Progress, state *OPState, targeter Target, requester 
 		case <-state.requests:
 			if !(atomic.AddInt64(&progress.totalRequests, 1) > config.maxRequests) {
 				requester.request(state.responses, &Request{targeter: targeter, startTime: time.Now()})
+			} else if config.maxRequests == -1 {
+				requester.request(state.responses, &Request{targeter: targeter, startTime: time.Now()})
 			} else {
+
 				return
 			}
 		}
@@ -205,21 +208,22 @@ func newOPState(op op, color string) *OPState {
 			buffersLen = o
 		}
 	}
+	arraySize := max(config.maxRequests, 10000)
 	state := OPState{
 		op:        op,
 		name:      name,
 		color:     color,
-		latencies: make(timeArray, 0, config.maxRequests),
+		latencies: make(timeArray, 0, arraySize),
 		colored:   ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
 		responses: make(chan *Response, buffersLen),
 		requests:  make(chan int, buffersLen),
 		progress:  make(chan bool, buffersLen),
 	}
 	if config.timelineFile != EmptyString {
-		state.timeline = make([]RequestTimes, 0, config.maxRequests)
+		state.timeline = make([]RequestTimes, 0, arraySize)
 	}
 	if op == WRITE && config.writeGoodUrls {
-		state.goodUrls = make([]string, 0, config.maxRequests)
+		state.goodUrls = make([]string, 0, arraySize)
 	}
 	return &state
 }
@@ -558,7 +562,7 @@ func makeLoad() {
 			default:
 				time.Sleep(time.Millisecond)
 			}
-			if progress.reads.getDone()+progress.writes.getDone() >= config.maxRequests {
+			if progress.reads.getDone()+progress.writes.getDone() >= config.maxRequests && config.maxRequests != -1 {
 				results.report("Maximum requests count")
 				break FOR_LOOP
 			}
@@ -780,7 +784,7 @@ func setPayloadGetter() {
 		if config.randomFairDistribution {
 			requestersConfig.payloadGetter = newFairPayload(fullData, int64(config.minBodySize), config.randomFairBuckets)
 		} else {
-			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize), int64(config.bodySizeGranularity))
+			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize), config.bodySizeGranularity)
 		}
 	}
 	requestersConfig.scratchBufferGetter = newScratchDataPayloadGetter(len(requestersConfig.fullData))
