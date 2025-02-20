@@ -352,14 +352,14 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 
 // Operators chosen by config
 type Operators struct {
-	readEmitter   Emitter
-	writeEmitter  Emitter
-	readAdjuster  Adjuster
-	writeAdjuster Adjuster
-	readRequester Requester
-	writeRequster Requester
-	readTarget    Target
-	writeTarget   Target
+	readEmitter    Emitter
+	writeEmitter   Emitter
+	readAdjuster   Adjuster
+	writeAdjuster  Adjuster
+	readRequester  Requester
+	writeRequester Requester
+	readTarget     Target
+	writeTarget    Target
 }
 
 func getOperators(progress *Progress) *Operators {
@@ -395,10 +395,10 @@ func getOperators(progress *Progress) *Operators {
 	}
 	switch config.engine {
 	case Sleep:
-		operators.writeRequster = newSleepRequster(progress.writes)
+		operators.writeRequester = newSleepRequster(progress.writes)
 		operators.readRequester = newSleepRequster(progress.reads)
 	case Upload, Http:
-		operators.writeRequster = newHTTPRequester(progress.writes, &nullAuther{})
+		operators.writeRequester = newHTTPRequester(progress.writes, &nullAuther{})
 		operators.readRequester = newHTTPRequester(progress.reads, &nullAuther{})
 	case S3:
 		s3params := s3Params{
@@ -414,16 +414,16 @@ func getOperators(progress *Progress) *Operators {
 		} else {
 			s3Auther = &s3AutherV2{s3params}
 		}
-		operators.writeRequster = newHTTPRequester(progress.writes, s3Auther)
+		operators.writeRequester = newHTTPRequester(progress.writes, s3Auther)
 		operators.readRequester = newHTTPRequester(progress.reads, s3Auther)
 	case Disk:
-		operators.writeRequster = newDiskRequester(progress.writes)
+		operators.writeRequester = newDiskRequester(progress.writes)
 		operators.readRequester = newDiskRequester(progress.reads)
 	case Meta:
-		operators.writeRequster = newMetaRequester(progress.writes)
+		operators.writeRequester = newMetaRequester(progress.writes)
 		operators.readRequester = newMetaRequester(progress.reads)
 	case Null:
-		operators.writeRequster = &nullRequester{}
+		operators.writeRequester = &nullRequester{}
 		operators.readRequester = &nullRequester{}
 	default:
 		log.Println("Unknown engine")
@@ -585,7 +585,7 @@ func makeLoad() {
 
 	for i := 0; i < config.maxChannels; i++ {
 		go startWorker(&progress, progress.reads, operators.readTarget, operators.readRequester, stopWorkers, workersWait)
-		go startWorker(&progress, progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers, workersWait)
+		go startWorker(&progress, progress.writes, operators.writeTarget, operators.writeRequester, stopWorkers, workersWait)
 	}
 	go processResponses(progress.writes, &results, operators.writeAdjuster, responseWait, stopWorkers)
 	go processResponses(progress.reads, &results, operators.readAdjuster, responseWait, stopWorkers)
