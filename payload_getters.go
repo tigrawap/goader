@@ -27,9 +27,10 @@ func newFullPayload(data []byte) *fullPayload {
 }
 
 type randomPayload struct {
-	data []byte
-	min  int64
-	max  int64
+	data      []byte
+	min       int64
+	max       int64
+	blockSize int64
 }
 
 func (p *randomPayload) Get() []byte {
@@ -44,19 +45,20 @@ func (p *randomPayload) GetLength() int64 {
 	if p.max == p.min {
 		return p.max
 	}
-	return p.min + rand.Int63n(p.max-p.min)
+	return (p.min + rand.Int63n(p.max-p.min)) / p.blockSize * p.blockSize
 }
 
-func newRandomPayload(data []byte, min int64) *randomPayload {
+func newRandomPayload(data []byte, min int64, blockSize int64) *randomPayload {
 	max := int64(len(data))
-	return &randomPayload{data, min, max}
+	return &randomPayload{data, min, max, blockSize}
 }
 
 type fairRandomPayload struct {
-	data   []byte
-	min    int64
-	max    int64
-	roller *utils.WeightedRoller
+	data      []byte
+	min       int64
+	max       int64
+	blockSize int64
+	roller    *utils.WeightedRoller
 }
 
 func (p *fairRandomPayload) Get() []byte {

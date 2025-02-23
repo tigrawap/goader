@@ -9,13 +9,13 @@ import (
 	"github.com/mgutz/ansi"
 )
 
-//HumanOutput will represent results in human form
+// HumanOutput will represent results in human form
 type HumanOutput struct {
 	pb   chan string
 	quit chan bool
 }
 
-//JSONOutput will represent results in json form
+// JSONOutput will represent results in json form
 type JSONOutput struct{}
 
 func newHumanOutput() *HumanOutput {
@@ -119,4 +119,19 @@ func (o *JSONOutput) report(s string) {
 }
 
 func (o *JSONOutput) reportError(s string) {
+}
+
+type PrometheusOutput struct{}
+
+func (p *PrometheusOutput) progress(s string) {
+}
+
+func (p *PrometheusOutput) reportError(s string) {
+}
+
+func (p *PrometheusOutput) report(s string) {
+}
+
+func (p *PrometheusOutput) printResults(result *Results) {
+	dumpMetrics()
 }

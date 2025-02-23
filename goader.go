@@ -29,7 +29,7 @@ import (
 	"sync/atomic"
 )
 
-//Request struct
+// Request struct
 type Request struct {
 	targeter  Target
 	url       string
@@ -43,84 +43,89 @@ func (r *Request) getUrl() string {
 	return r.url
 }
 
-//Response struct
+// Response struct
 type Response struct {
-	request *Request
-	latency time.Duration
-	err     error
+	request     *Request
+	latency     time.Duration
+	payloadSize int64
+	err         error
 }
 
-//Various constants to avoid typos
+// Various constants to avoid typos
 const (
-	LowLatency      = "low-latency"
-	ConstantRatio   = "constant"
-	ConstantThreads = "constant-threads"
-	Sleep           = "sleep"
-	Upload          = "upload"
-	Http            = "http"
-	S3              = "s3"
-	Disk            = "disk"
-	Meta            = "meta"
-	Null            = "null"
-	NotSet          = -1
-	EmptyString     = ""
-	NotSetString    = "_GOADER_NOT_SET_"
-	NotSetFloat64   = -1.0
-	FormatHuman     = "human"
-	FormatJSON      = "json"
-	HttpsScheme     = "https"
-	HttpScheme      = "http"
+	LowLatency                       = "low-latency"
+	ConstantRatio                    = "constant"
+	ConstantThreads                  = "constant-threads"
+	Sleep                            = "sleep"
+	Upload                           = "upload"
+	Http                             = "http"
+	S3                               = "s3"
+	Disk                             = "disk"
+	Meta                             = "meta"
+	Null                             = "null"
+	NotSet                           = -1
+	EmptyString                      = ""
+	NotSetString                     = "_GOADER_NOT_SET_"
+	NotSetFloat64                    = -1.0
+	FormatHuman                      = "human"
+	FormatJSON                       = "json"
+	FormatPrometheus                 = "prometheus"
+	HttpsScheme                      = "https"
+	HttpScheme                       = "http"
+	MaxGoodInMemUrlsForIndefiniteRun = 1000000 // only used if numRequests = -1
 )
 
 var config struct {
-	url                    string //url/pattern
-	urlsSourceFile         string //url/pattern
-	writtenUrlsDump        string
-	rps                    int
-	wps                    int
-	rpw                    float64
-	writeThreads           int
-	readThreads            int
-	mkdirs                 bool
-	maxChannels            int
-	verbose                bool
-	memoryDebug            bool
-	maxRequests            int64
-	bodySize               uint64
-	minBodySize            uint64
-	maxBodySize            uint64
-	bodySizeInput          string
-	minBodySizeInput       string
-	maxBodySizeInput       string
-	metaOps                metaOps
-	metaXattrKeys          int
-	metaXattrLength        int
-	randomFairDistribution bool
-	randomFairBuckets      int
-	fileOffsetLimitInput   string
-	fileOffsetLimit        uint64
-	mode                   string
-	engine                 string
-	outputFormat           string
-	showProgress           bool
-	stopOnBadRate          bool
-	adjustOnErrors         bool
-	output                 Output
-	syncSleep              time.Duration
-	maxLatency             time.Duration
-	S3ApiKey               string
-	S3Bucket               string
-	S3Endpoint             string
-	S3HttpScheme           string
-	S3Region               string
-	S3SecretKey            string
-	S3SignatureVersion     int
-	timelineFile           string
-	seed                   int64
-	writeGoodUrls          bool
+	url                     string //url/pattern
+	urlsSourceFile          string //url/pattern
+	writtenUrlsDump         string
+	rps                     int
+	wps                     int
+	rpw                     float64
+	writeThreads            int
+	readThreads             int
+	mkdirs                  bool
+	maxChannels             int
+	verbose                 bool
+	memoryDebug             bool
+	maxRequests             int64
+	bodySize                uint64
+	minBodySize             uint64
+	maxBodySize             uint64
+	bodySizeInput           string
+	minBodySizeInput        string
+	maxBodySizeInput        string
+	bodySizeGranularity     int64
+	metaOps                 metaOps
+	metaXattrKeys           int
+	metaXattrLength         int
+	randomFairDistribution  bool
+	randomFairBuckets       int
+	fileOffsetLimitInput    string
+	fileOffsetLimit         uint64
+	mode                    string
+	engine                  string
+	outputFormat            string
+	showProgress            bool
+	stopOnBadRate           bool
+	adjustOnErrors          bool
+	output                  Output
+	syncSleep               time.Duration
+	maxLatency              time.Duration
+	S3ApiKey                string
+	S3Bucket                string
+	S3Endpoint              string
+	S3HttpScheme            string
+	S3Region                string
+	S3SecretKey             string
+	S3SignatureVersion      int
+	timelineFile            string
+	seed                    int64
+	writeGoodUrls           bool
+	enablePrometheusMetrics bool
 }
 
-//OPResults result of specific operation, lately can be printed by different outputters
+// OPResults result of specific operation, lately can be printed by different outputters
 type OPResults struct {
 	Errors         int64
 	Done           int64
@@ -133,7 +138,7 @@ type OPResults struct {
 	StaggeredFor   time.Duration
 }
 
-//Results of benchmark execution, represents final output, marshalled directly into json in json output mode
+// Results of benchmark execution, represents final output, marshalled directly into json in json output mode
 type Results struct {
 	Writes    OPResults
 	Reads     OPResults
@@ -151,7 +156,10 @@ func startWorker(progress *Progress, state *OPState, targeter Target, requester 
 		case <-state.requests:
 			if !(atomic.AddInt64(&progress.totalRequests, 1) > config.maxRequests) {
 				requester.request(state.responses, &Request{targeter: targeter, startTime: time.Now()})
+			} else if config.maxRequests == -1 {
+				requester.request(state.responses, &Request{targeter: targeter, startTime: time.Now()})
 			} else {
+
 				return
 			}
 		}
@@ -160,13 +168,13 @@ func startWorker(progress *Progress, state *OPState, targeter Target, requester 
 
 type op int
 
-//Operation type
+// Operation type
 const (
 	READ op = iota
 	WRITE
 )
 
-//OPState contains state for OP(READ/WRITE)
+// OPState contains state for OP(READ/WRITE)
 type OPState struct {
 	color            string
 	concurrency      int
@@ -201,21 +209,22 @@ func newOPState(op op, color string) *OPState {
 			buffersLen = o
 		}
 	}
+	arraySize := max(config.maxRequests, 10000)
 	state := OPState{
 		op:        op,
 		name:      name,
 		color:     color,
-		latencies: make(timeArray, 0, config.maxRequests),
+		latencies: make(timeArray, 0, arraySize),
 		colored:   ansi.ColorFunc(fmt.Sprintf("%s+h:black", color)),
 		responses: make(chan *Response, buffersLen),
 		requests:  make(chan int, buffersLen),
 		progress:  make(chan bool, buffersLen),
 	}
 	if config.timelineFile != EmptyString {
-		state.timeline = make([]RequestTimes, 0, config.maxRequests)
+		state.timeline = make([]RequestTimes, 0, arraySize)
 	}
 	if op == WRITE && config.writeGoodUrls {
-		state.goodUrls = make([]string, 0, config.maxRequests)
+		state.goodUrls = make([]string, 0, arraySize)
 	}
 	return &state
 }
@@ -251,20 +260,35 @@ func processResponses(state *OPState, results *Results, adjuster Adjuster, w *sy
 		case response = <-state.responses:
 			state.opDone()
 			state.progress <- response.err == nil
-			if response.err == nil {
-				state.totalTime += response.latency
-				state.slicesLock.Lock()
-				if state.op == WRITE && config.writeGoodUrls {
-					state.goodUrls = append(state.goodUrls, response.request.getUrl())
+			if config.enablePrometheusMetrics {
+				if counter, ok := OpCounters[state.name]; ok {
+					if response.err == nil {
+						counter.WithLabelValues("success", strconv.FormatInt(response.payloadSize, 10)).Inc()
+					} else {
+						counter.WithLabelValues("error", strconv.FormatInt(response.payloadSize, 10)).Inc()
+					}
 				}
-				state.latencies = append(state.latencies, response.latency)
-				state.slicesLock.Unlock()
+				if hist, ok := OpDurations[state.name]; ok {
+					hist.Observe(float64(response.latency.Nanoseconds()))
+				}
 			} else {
-				if config.verbose {
-					results.reportError(response.err.Error())
+				if response.err == nil {
+					state.totalTime += response.latency
+					state.slicesLock.Lock()
+					state.latencies = append(state.latencies, response.latency)
+					state.slicesLock.Unlock()
+				} else {
+					if config.verbose {
+						results.reportError(response.err.Error())
+					}
+					state.errors++
 				}
-				state.errors++
 			}
+
+			if response.err == nil && state.op == WRITE && config.writeGoodUrls && (config.maxRequests > 0 || len(state.goodUrls) < MaxGoodInMemUrlsForIndefiniteRun) {
+				state.goodUrls = append(state.goodUrls, response.request.getUrl())
+			}
+
 			if config.timelineFile != EmptyString {
 				state.timeline = append(state.timeline, RequestTimes{
 					Start:   response.request.startTime,
@@ -326,16 +350,16 @@ func fillResults(results *OPResults, state *OPState, startTime time.Time) {
 	results.AverageGoodOps = int64(float64((state.getDone()-state.errors)*int64(time.Second))/float64(time.Since(startTime).Nanoseconds())) + 1
 }
 
-//Operators chosen by config
+// Operators chosen by config
 type Operators struct {
-	readEmitter   Emitter
-	writeEmitter  Emitter
-	readAdjuster  Adjuster
-	writeAdjuster Adjuster
-	readRequester Requester
-	writeRequster Requester
-	readTarget    Target
-	writeTarget   Target
+	readEmitter    Emitter
+	writeEmitter   Emitter
+	readAdjuster   Adjuster
+	writeAdjuster  Adjuster
+	readRequester  Requester
+	writeRequester Requester
+	readTarget     Target
+	writeTarget    Target
 }
 
 func getOperators(progress *Progress) *Operators {
@@ -371,10 +395,10 @@ func getOperators(progress *Progress) *Operators {
 	}
 	switch config.engine {
 	case Sleep:
-		operators.writeRequster = newSleepRequster(progress.writes)
+		operators.writeRequester = newSleepRequster(progress.writes)
 		operators.readRequester = newSleepRequster(progress.reads)
 	case Upload, Http:
-		operators.writeRequster = newHTTPRequester(progress.writes, &nullAuther{})
+		operators.writeRequester = newHTTPRequester(progress.writes, &nullAuther{})
 		operators.readRequester = newHTTPRequester(progress.reads, &nullAuther{})
 	case S3:
 		s3params := s3Params{
@@ -390,16 +414,16 @@ func getOperators(progress *Progress) *Operators {
 		} else {
 			s3Auther = &s3AutherV2{s3params}
 		}
-		operators.writeRequster = newHTTPRequester(progress.writes, s3Auther)
+		operators.writeRequester = newHTTPRequester(progress.writes, s3Auther)
 		operators.readRequester = newHTTPRequester(progress.reads, s3Auther)
 	case Disk:
-		operators.writeRequster = newDiskRequester(progress.writes)
+		operators.writeRequester = newDiskRequester(progress.writes)
 		operators.readRequester = newDiskRequester(progress.reads)
 	case Meta:
-		operators.writeRequster = newMetaRequester(progress.writes)
+		operators.writeRequester = newMetaRequester(progress.writes)
 		operators.readRequester = newMetaRequester(progress.reads)
 	case Null:
-		operators.writeRequster = &nullRequester{}
+		operators.writeRequester = &nullRequester{}
 		operators.readRequester = &nullRequester{}
 	default:
 		log.Println("Unknown engine")
@@ -447,7 +471,7 @@ func p(s string) {
 	config.output.progress(s)
 }
 
-//TODO: Don't really like this global variables, methods on result, global config. Need to rethink
+// TODO: Don't really like this global variables, methods on result, global config. Need to rethink
 func (r *Results) reportError(s string) {
 	r.Errors = append(r.Errors, s)
 	config.output.reportError(s)
@@ -542,7 +566,7 @@ func makeLoad() {
 			default:
 				time.Sleep(time.Millisecond)
 			}
-			if progress.reads.getDone()+progress.writes.getDone() >= config.maxRequests {
+			if progress.reads.getDone()+progress.writes.getDone() >= config.maxRequests && config.maxRequests != -1 {
 				results.report("Maximum requests count")
 				break FOR_LOOP
 			}
@@ -561,7 +585,7 @@ func makeLoad() {
 
 	for i := 0; i < config.maxChannels; i++ {
 		go startWorker(&progress, progress.reads, operators.readTarget, operators.readRequester, stopWorkers, workersWait)
-		go startWorker(&progress, progress.writes, operators.writeTarget, operators.writeRequster, stopWorkers, workersWait)
+		go startWorker(&progress, progress.writes, operators.writeTarget, operators.writeRequester, stopWorkers, workersWait)
 	}
 	go processResponses(progress.writes, &results, operators.writeAdjuster, responseWait, stopWorkers)
 	go processResponses(progress.reads, &results, operators.readAdjuster, responseWait, stopWorkers)
@@ -700,6 +724,9 @@ func selectPrinter() {
 		config.output = newHumanOutput()
 	case FormatJSON:
 		config.output = &JSONOutput{}
+	case FormatPrometheus:
+		config.output = &PrometheusOutput{}
+		config.enablePrometheusMetrics = true
 	default:
 		fmt.Println("Unknown output format")
 		os.Exit(2)
@@ -761,7 +788,7 @@ func setPayloadGetter() {
 		if config.randomFairDistribution {
 			requestersConfig.payloadGetter = newFairPayload(fullData, int64(config.minBodySize), config.randomFairBuckets)
 		} else {
-			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize))
+			requestersConfig.payloadGetter = newRandomPayload(fullData, int64(config.minBodySize), config.bodySizeGranularity)
 		}
 	}
 	requestersConfig.scratchBufferGetter = newScratchDataPayloadGetter(len(requestersConfig.fullData))
@@ -801,6 +828,7 @@ func configure() {
 	flag.StringVar(&config.bodySizeInput, "body-size", "160KiB", "Body size for put requests, in bytes.")
 	flag.StringVar(&config.maxBodySizeInput, "max-body-size", NotSetString, "Maximum body size for put requests (will randomize)")
 	flag.StringVar(&config.minBodySizeInput, "min-body-size", NotSetString, "Minimal body size for put requests (will randomize)")
+	flag.Int64Var(&config.bodySizeGranularity, "body-size-granularity", 1, "Granularity of body size, i.e 4096 will randomize body size adjusted to 4096 bytes")
 	flag.BoolVar(&config.randomFairDistribution, "fair-random", false, "Will produce fair distribution of body sizes, i.e with size 1-100 will produce ~100 requests of 1 byte and 1 requests of 100 bytes")
 	flag.StringVar(&config.engine, "requests-engine", Disk, "s3/sleep/upload/http")
 	flag.DurationVar(&config.maxLatency, "max-latency", NotSet,
@@ -828,17 +856,22 @@ func configure() {
 	flag.IntVar(&config.metaXattrLength, "meta-xattr-length", 5120, "Maximum length of xattrs, using weighed algorithm to distribute the sizes")
 	flag.StringVar(&config.fileOffsetLimitInput, "meta-offset-limit", "16MiB", "Limit of offset for writes/truncate")
 	flag.Int64Var(&config.seed, "seed", NotSet, "Seed to use in random generator")
+	flag.BoolVar(&config.enablePrometheusMetrics, "enable-prometheus-metrics", false, "Enable prometheus metrics endpoint, for long runs in Kubernetes")
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
 	if config.url == EmptyString && flag.NArg() == 1 {
 		config.url = flag.Args()[0]
 	}
+	if config.outputFormat == FormatPrometheus {
+		config.enablePrometheusMetrics = true
+	}
 
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	setParams()
+	setMetrics()
 	setRandomData()
 	setPayloadGetter()
 	selectMode()

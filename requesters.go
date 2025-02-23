@@ -22,18 +22,18 @@ import (
 type nullRequester struct {
 }
 
-type sleepRequster struct {
+type sleepRequester struct {
 	state *OPState
 	db    chan int
 }
 
 func (n *nullRequester) request(responses chan *Response, request *Request) {
-	responses <- &Response{request, time.Nanosecond, nil}
+	responses <- &Response{request, time.Nanosecond * time.Duration(rand.Intn(1000000)), 0, nil}
 }
 
-func (requester *sleepRequster) request(responses chan *Response, request *Request) {
+func (requester *sleepRequester) request(responses chan *Response, request *Request) {
 	if rand.Intn(10000)-int(requester.state.inFlight) < 0 {
-		responses <- &Response{request, 0, errors.New("Bad response")}
+		responses <- &Response{request, 0, 0, errors.New("Bad response")}
 		return
 	}
 	start := time.Now()
@@ -41,11 +41,11 @@ func (requester *sleepRequster) request(responses chan *Response, request *Reque
 	var timeToSleep = time.Duration(rand.Intn(200)) * time.Millisecond
 	time.Sleep(timeToSleep)
 	<-requester.db
-	responses <- &Response{request, time.Since(start), nil}
+	responses <- &Response{request, time.Since(start), 0, nil}
 }
 
-func newSleepRequster(state *OPState) *sleepRequster {
-	r := sleepRequster{
+func newSleepRequster(state *OPState) *sleepRequester {
+	r := sleepRequester{
 		state: state,
 		db:    make(chan int, 10),
 	}
@@ -92,7 +92,7 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 	defer func() {
 		if err := recover(); err != nil { //catch
 			responses <- &Response{&Request{targeter: &BadUrlTarget{}, startTime: time.Now()}, time.Nanosecond,
-				fmt.Errorf("Error: %s,%v", "panic:", err)}
+				0, fmt.Errorf("Error: %s,%v", "panic:", err)}
 			return
 		}
 	}()
@@ -110,8 +110,11 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	req.Header.SetMethodBytes([]byte(requester.method))
 	req.Header.Set("Connection", "keep-alive")
+	var payloadSize int64 = 0
 	if requester.method == "PUT" || requester.method == "POST" {
-		req.SetBody(requestersConfig.payloadGetter.Get())
+		body := requestersConfig.payloadGetter.Get()
+		payloadSize = int64(len(body))
+		req.SetBody(body)
 	}
 	requester.auther.sign(req)
 	resp := fasthttp.AcquireResponse()
@@ -123,15 +126,15 @@ func (requester *httpRequester) request(responses chan *Response, request *Reque
 
 	if err != nil {
 		responses <- &Response{request, timeSpent,
-			fmt.Errorf("Bad request: %s\n%s\n%s", err, resp.Header.String(), resp.Body())}
+			payloadSize, fmt.Errorf("Bad request: %s\n%s\n%s", err, resp.Header.String(), resp.Body())}
 		return
 	}
 
 	switch statusCode {
 	case fasthttp.StatusOK, fasthttp.StatusCreated:
-		responses <- &Response{request, timeSpent, nil}
+		responses <- &Response{request, timeSpent, payloadSize, nil}
 	default:
-		responses <- &Response{request, timeSpent,
+		responses <- &Response{request, timeSpent, payloadSize,
 			fmt.Errorf("Error: %d \n%s \n%s ", resp.StatusCode(), resp.Header.String(), resp.Body())}
 	}
 }
@@ -155,9 +158,12 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 	filename := request.getUrl()
 
 	var err error
+	var payloadSize int64 = 0
 	start := time.Now()
 	if requester.state.op == WRITE {
-		err = ioutil.WriteFile(filename, requestersConfig.payloadGetter.Get(), 0644)
+		payload := requestersConfig.payloadGetter.Get()
+		payloadSize = int64(len(payload))
+		err = ioutil.WriteFile(filename, payload, 0644)
 		if os.IsNotExist(err) && config.mkdirs {
 			err = os.MkdirAll(path.Dir(filename), 0755)
 			if !isRetry {
@@ -169,12 +175,13 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 		if fd, err := os.OpenFile(filename, os.O_RDONLY, 0644); err == nil {
 			if fi, err := fd.Stat(); err == nil {
 				size := fi.Size()
+				payloadSize = size
 				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(size))
 				fd.Close()
 			}
 		}
 	}
-	responses <- &Response{request, time.Since(start), err}
+	responses <- &Response{request, time.Since(start), payloadSize, err}
 }
 
 type metaOpRequst string
@@ -229,6 +236,7 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 	var err error
 	start := time.Now()
 	op := r.ops[rand.Intn(r.opLen)]
+	var payloadSize int64 = 0
 	switch op {
 	case opWrite, opRead:
 		var fd *os.File
@@ -241,9 +249,12 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 		if fd, err = os.OpenFile(filename, flags, 0644); err == nil {
 			fd.Seek(rand.Int63n(int64(config.fileOffsetLimit)), io.SeekStart)
 			if op == opWrite {
-				fd.Write(requestersConfig.payloadGetter.Get())
+				payload := requestersConfig.payloadGetter.Get()
+				payloadSize = int64(len(payload))
+				fd.Write(payload)
 			} else {
-				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(requestersConfig.payloadGetter.GetLength()))
+				payloadSize = requestersConfig.payloadGetter.GetLength()
+				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(payloadSize))
 			}
 			fd.Close() // TODO: Defer and reuse FD
 		}
@@ -283,7 +294,7 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 			return
 		}
 	}
-	responses <- &Response{request, time.Since(start), err}
+	responses <- &Response{request, time.Since(start), payloadSize, err}
 }
 
 func newMetaRequester(state *OPState) *metaRequester {
