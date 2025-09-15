@@ -171,10 +171,24 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 		}
 	} else {
 		if fd, err := os.OpenFile(filename, os.O_RDONLY, 0644); err == nil {
+			defer fd.Close()
 			if fi, err := fd.Stat(); err == nil {
 				size := fi.Size()
-				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(size))
-				fd.Close()
+				if config.chunkSize == 0 {
+					// Original behavior: read whole file in single operation
+					fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(size))
+				} else {
+					// Chunked reading: read file in chunks of specified size, reusing buffer
+					chunkSize := int64(config.chunkSize)
+					buffer := requestersConfig.scratchBufferGetter.GetBuffer(chunkSize)
+					for offset := int64(0); offset < size; offset += chunkSize {
+						readSize := chunkSize
+						if offset+chunkSize > size {
+							readSize = size - offset
+						}
+						fd.Read(buffer[:readSize])
+					}
+				}
 			}
 		}
 	}
