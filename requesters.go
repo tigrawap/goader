@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"github.com/tigrawap/goader/ops"
@@ -77,6 +78,9 @@ func newHTTPRequester(state *OPState, auther HTTPAuther) *httpRequester {
 		requester.timeout = 5 * config.maxLatency
 	}
 	requester.client.MaxConnsPerHost = config.maxChannels
+	if config.insecureHttps {
+		requester.client.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	return &requester
 }
 

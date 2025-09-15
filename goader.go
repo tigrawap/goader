@@ -118,6 +118,7 @@ var config struct {
 	timelineFile           string
 	seed                   int64
 	writeGoodUrls          bool
+	insecureHttps          bool
 }
 
 //OPResults result of specific operation, lately can be printed by different outputters
@@ -823,6 +824,7 @@ func configure() {
 	flag.BoolVar(&config.memoryDebug, "memory-debug", false, "Print out memory usage information to stderr every 10 seconds")
 	flag.BoolVar(&config.adjustOnErrors, "adjust-on-errors", true, "Adjust concurrency in max-latency mode on errors")
 	flag.StringVar(&config.timelineFile, "timeline-file", EmptyString, "Path to timeline.html (visual representation of progress)")
+	flag.BoolVar(&config.insecureHttps, "insecure-https", false, "Disable SSL certificate validation")
 	flag.Var(&config.metaOps, "meta-ops", "Comma-separated list of meta ops, can specify weight with :int, i.e write:3,unlink:1")
 	flag.IntVar(&config.metaXattrKeys, "meta-xattr-keys", 10, "Maximum number of xattr values in file")
 	flag.IntVar(&config.metaXattrLength, "meta-xattr-length", 5120, "Maximum length of xattrs, using weighed algorithm to distribute the sizes")
