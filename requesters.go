@@ -161,7 +161,28 @@ func (requester *diskRequester) doRequest(responses chan *Response, request *Req
 	var err error
 	start := time.Now()
 	if requester.state.op == WRITE {
-		err = ioutil.WriteFile(filename, requestersConfig.payloadGetter.Get(), 0644)
+		if config.chunkSize == 0 {
+			// Original behavior: write whole file in single operation
+			err = ioutil.WriteFile(filename, requestersConfig.payloadGetter.Get(), 0644)
+		} else {
+			// Chunked writing: write file in chunks of specified size
+			if fd, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+				defer fd.Close()
+				payload := requestersConfig.payloadGetter.Get()
+				payloadSize := int64(len(payload))
+				chunkSize := int64(config.chunkSize)
+				for offset := int64(0); offset < payloadSize; offset += chunkSize {
+					writeSize := chunkSize
+					if offset+chunkSize > payloadSize {
+						writeSize = payloadSize - offset
+					}
+					_, err = fd.Write(payload[offset : offset+writeSize])
+					if err != nil {
+						break
+					}
+				}
+			}
+		}
 		if os.IsNotExist(err) && config.mkdirs {
 			err = os.MkdirAll(path.Dir(filename), 0755)
 			if !isRetry {
@@ -259,7 +280,25 @@ func (r *metaRequester) doRequest(responses chan *Response, request *Request, is
 		if fd, err = os.OpenFile(filename, flags, 0644); err == nil {
 			fd.Seek(rand.Int63n(int64(config.fileOffsetLimit)), io.SeekStart)
 			if op == opWrite {
-				fd.Write(requestersConfig.payloadGetter.Get())
+				if config.chunkSize == 0 {
+					// Original behavior: write whole payload in single operation
+					fd.Write(requestersConfig.payloadGetter.Get())
+				} else {
+					// Chunked writing: write payload in chunks of specified size
+					payload := requestersConfig.payloadGetter.Get()
+					payloadSize := int64(len(payload))
+					chunkSize := int64(config.chunkSize)
+					for offset := int64(0); offset < payloadSize; offset += chunkSize {
+						writeSize := chunkSize
+						if offset+chunkSize > payloadSize {
+							writeSize = payloadSize - offset
+						}
+						_, err = fd.Write(payload[offset : offset+writeSize])
+						if err != nil {
+							break
+						}
+					}
+				}
 			} else {
 				fd.Read(requestersConfig.scratchBufferGetter.GetBuffer(requestersConfig.payloadGetter.GetLength()))
 			}

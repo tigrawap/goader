@@ -833,7 +833,7 @@ func configure() {
 	flag.IntVar(&config.metaXattrLength, "meta-xattr-length", 5120, "Maximum length of xattrs, using weighed algorithm to distribute the sizes")
 	flag.StringVar(&config.fileOffsetLimitInput, "meta-offset-limit", "16MiB", "Limit of offset for writes/truncate")
 	flag.Int64Var(&config.seed, "seed", NotSet, "Seed to use in random generator")
-	flag.StringVar(&config.chunkSizeInput, "chunk-size", "0", "Chunk size for disk reads. 0 means read whole file in one operation. Examples: 512KiB, 1MiB")
+	flag.StringVar(&config.chunkSizeInput, "chunk-size", "0", "Chunk size for disk reads and writes. 0 means read/write whole file in one operation. Examples: 512KiB, 1MiB")
 	flag.Parse()
 	var err error
 	config.bodySize, err = humanize.ParseBytes(config.bodySizeInput)
